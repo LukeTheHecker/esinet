@@ -9,10 +9,11 @@ from tqdm import tqdm
 import colorednoise as cn
 import pickle as pkl
 from joblib import Parallel, delayed
+from ..util import *
 
 def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 3), 
     amplitudes=(5, 10), shape='gaussian', durOfTrial=1, sampleFreq=100, 
-    regionGrowing=True, parallel=False):
+    regionGrowing=True, n_jobs=-1, return_raw_data=False):
     ''' A wrapper function for the core function "simulate_source" which
     calculates simulations multiple times. 
     Parameters:
@@ -21,12 +22,16 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
     files n_simulations : int, number of simulations to perform. 100,000 perform
         great, 10,000 are fine for testing. 
     parallel : bool, perform simulations in parallel (can be faster) or sequentially 
-    
+    n_jobs : int, number of jobs to run in parallel, -1 utilizes all cores
+    return_raw_data : bool, if True the function returns a list of 
+        mne.SourceEstimate objects, otherwise it returns raw data
+
     <for the rest see function "simulate_source"> 
     
     Parameters:
     -----------
-    sources : list, list of "n_simulation" simulations
+    sources : list, list of simulations containing either mne.SourceEstimate 
+        objects or raw arrays (see <return_raw_data> argument)
     '''
 
     if not pth_fwd.endswith('/'):
@@ -51,13 +56,19 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
                 'sampleFreq': sampleFreq,
                 'regionGrowing': regionGrowing
                 }
-    if parallel:
-        sources = np.stack(Parallel(n_jobs=-1, backend='loky')
-            (delayed(simulate_source)(pos, neighbors, **settings) 
-            for i in tqdm(range(n_simulations))))
-    else:
-        sources = [simulate_source(pos, neighbors, **settings) 
-            for i in tqdm(range(n_simulations))]
+
+    print(f'\nRun {n_simulations} simulations...')
+    sources = np.stack(Parallel(n_jobs=n_jobs, backend='loky')(
+        delayed(simulate_source)(pos, neighbors, **settings) 
+        for i in tqdm(range(n_simulations))))
+
+    if not return_raw_data:
+        print(f'\nConvert simulations to instances of mne.SourceEstimate...')
+        source_estimates = Parallel(n_jobs=n_jobs, backend='loky')(
+            delayed(source_to_sourceEstimate)(source[0], pth_fwd, sfreq=sampleFreq, simulationInfo=source[1]) 
+            for source in tqdm(sources))
+        sources = source_estimates
+
     return sources
 
 def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes=(5, 10),
@@ -68,20 +79,19 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     Parameters:
     -----------
     pos : numpy.ndarray, (n_dipoles x 3), list of dipole positions.
-    settings : dict, 
-        n_sources : int/tuple/list, number of sources. Can be a single number or a 
-            list of two numbers specifying a range.
-        regionGrowing : bool, whether to use region growing. If True, please supply
-            also the neighbors to the settings.
-        neighbors : list, a list containing all the (triangle-) neighbors for each 
-            dipole. Can be calculated using "get_triangle_neighbors"
-        extents : int/float/tuple/list, size of sources. If regionGrowing==True this 
-            specifies the neighborhood order (see Grova et al., 2006), otherwise the diameter in mm. Can be a single number or a 
-            list of two numbers specifying a range.
-        amplitudes : int/float/tuple/list, the current of the source in nAm
-        shape : str, How the amplitudes evolve over space. Can be 'gaussian' or 'flat' (i.e. uniform).
-        durOfTrial : int/float, specifies the duration of a trial.
-        sampleFreq : int, specifies the sample frequency of the data.
+    n_sources : int/tuple/list, number of sources. Can be a single number or a 
+        list of two numbers specifying a range.
+    regionGrowing : bool, whether to use region growing. If True, please supply
+        also the neighbors to the settings.
+    neighbors : list, a list containing all the (triangle-) neighbors for each 
+        dipole. Can be calculated using "get_triangle_neighbors"
+    extents : int/float/tuple/list, size of sources. If regionGrowing==True this 
+        specifies the neighborhood order (see Grova et al., 2006), otherwise the diameter in mm. Can be a single number or a 
+        list of two numbers specifying a range.
+    amplitudes : int/float/tuple/list, the current of the source in nAm
+    shape : str, How the amplitudes evolve over space. Can be 'gaussian' or 'flat' (i.e. uniform).
+    durOfTrial : int/float, specifies the duration of a trial.
+    sampleFreq : int, specifies the sample frequency of the data.
     Return:
     -------
     source : numpy.ndarray, (n_dipoles x n_timepoints), the simulated source signal
@@ -177,7 +187,13 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     source = np.squeeze(sourceOverTime * signal)
     if len(source.shape) == 1:
         source = np.expand_dims(source, axis=1)
-    simSettings = dict(scr_center_indices=src_centers, amplitudes=amplitudes, extents=extents, shape=shape, sourceMask=sourceMask)
+    
+    # Prepare informative dictionary that entails all infos on how the simulation was created.
+    simSettings = dict(scr_center_indices=src_centers, amplitudes=amplitudes, extents=extents, 
+        shape=shape, sourceMask=sourceMask, regionGrowing=regionGrowing, durOfTrial=durOfTrial,
+        sampleFreq=sampleFreq)
+
+
     return source, simSettings
 
 def get_pulse(x):
@@ -206,7 +222,6 @@ def get_n_order_indices(order, pick_idx, neighbors):
     current_indices = [pick_idx]
     for cnt in range(order):
         # current_indices = list(np.array( current_indices ).flatten())
-        # print(f'\norder={cnt}, current_indices={current_indices}\n')
         new_indices = [neighbors[i] for i in current_indices]
         new_indices = flatten( new_indices )
         current_indices.extend(new_indices)
@@ -269,8 +284,7 @@ def add_noise(x, snr, beta=0):
     noise_scaler = rms_x / (rms_noise*snr)
     return x + noise*noise_scaler
 
-def rms(x):
-    return np.sqrt(np.mean(np.square(x)))
+
 
 
 def create_eeg_helper(eeg_sample, n_trials, snr, beta):
@@ -279,35 +293,68 @@ def create_eeg_helper(eeg_sample, n_trials, snr, beta):
 
     # noise_trial = np.stack([add_noise(eeg_sample, snr, beta) for trial in range(n_trials)], axis=0)
     noise_trial = add_noise(eeg_sample, snr, beta)
-    # print(f'noise_trial.shape={noise_trial.shape}')
     
     return noise_trial
 
 
-def create_eeg(sources, pth_fwd, snr=1, n_trials=20, beta=0, parallel=False):
-    ''' Create EEG of specified number of trials based on sources and some SNR.'''
-    with open(pth_fwd + '/leadfield.pkl', 'rb') as file:
-        leadfield = pkl.load(file)[0]
+def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
+    return_raw_data=False):
+    ''' Create EEG of specified number of trials based on sources and some SNR.
+    Parameters:
+    -----------
+    sourceEstimates : list, list containing mne.SourceEstimate objects
+    pth_fwd : str, path to the forward model files
+    snr : float, desired signal to noise ratio within individual trials
+    n_trials : int, number of simulated trials
+    beta : float, determines the frequency spectrum of the noise added 
+        to the signal: power = (1/f)^beta. 
+        0 will yield white noise, 
+        1 will yield pink noise (1/f spectrum)
+    n_jobs : int, Number of jobs to run in parallel. 
+        -1 will utilize all cores.
+    return_raw_data : bool, if True the function returns a list of 
+        mne.SourceEstimate objects, otherwise it returns raw data
+    Return:
+    -------
+    epochs : list, list of either mne.Epochs objects or list of raw EEG 
+        data (see argument <return_raw_data> to change output).
+    '''
+    # Unpack the source data from the SourceEstimate objects
+    sources = [se.data for se in sourceEstimates]
+    # Load some forward model objects
+    leadfield = load_leadfield(pth_fwd)
+    info = load_info(pth_fwd)
+    info['sfreq'] = sourceEstimates[0].simulationInfo['sampleFreq']
+    
     n_samples = len(sources)
     n_elec = leadfield.shape[0]
-    n_timepoints = sources[0][0].shape[1]
+    n_timepoints = sources[0].shape[1]
 
-    eeg_clean = np.stack([np.matmul(leadfield, y[0]) for y in sources], axis=0)
+    eeg_clean = np.stack([np.matmul(leadfield, y) for y in sources], axis=0)
 
     eeg_trials_noisy = np.zeros((n_samples, n_trials, n_elec, n_timepoints))
-    if parallel:
-        eeg_trials_noisy = np.stack(Parallel(n_jobs=-1, backend='loky')
-            (delayed(create_eeg_helper)(eeg_clean[sample], n_trials, snr, beta) 
-            for sample in tqdm(range(n_samples))))
-    else:
-        eeg_trials_noisy = np.stack([
-            create_eeg_helper(eeg_clean[sample], n_trials, snr, beta) 
-            for sample in tqdm(range(n_samples))], axis=0)
+
+    print(f'\nCreate EEG trials with noise...')
+    eeg_trials_noisy = np.stack(Parallel(n_jobs=n_jobs, backend='loky')
+        (delayed(create_eeg_helper)(eeg_clean[sample], n_trials, snr, beta) 
+        for sample in tqdm(range(n_samples))))
+    # else:
+    #     eeg_trials_noisy = np.stack([
+    #         create_eeg_helper(eeg_clean[sample], n_trials, snr, beta) 
+    #         for sample in tqdm(range(n_samples))], axis=0)
     
     if len(eeg_trials_noisy.shape) == 3:
         eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=-1)
 
-    return eeg_trials_noisy
+    if not return_raw_data:
+        print(f'\nConvert EEG matrices to instances of mne.Epochs...')
+        epochs = Parallel(n_jobs=n_jobs, backend='loky')(
+            delayed(eeg_to_Epochs)(sample, pth_fwd, info=info) 
+            for sample in tqdm(eeg_trials_noisy))
+    else:
+        epochs = eeg_trials_noisy
+
+    return epochs
 
 # def create_eeg(sources, pth_fwd, snr=1, n_trials=20, beta=0):
 #     ''' Create EEG of specified number of trials based on sources and some SNR.'''

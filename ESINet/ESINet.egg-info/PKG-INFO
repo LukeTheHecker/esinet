@@ -1,0 +1,23 @@
+Metadata-Version: 2.1
+Name: ESINet
+Version: 0.0.1
+Summary: Solve the M/EEG inverse problem using artificial neural networks with Python 3 and the MNE library.
+Home-page: https://github.com/LukeTheHecker/ESINet
+Author: Lukas Hecker
+Author-email: lukas_hecker@web.de
+License: UNKNOWN
+Description: Solve the M/EEG inverse problem using artificial neural networks with Python 3
+        and the MNE library.
+        
+        The functions allow you to 
+        * Create a forward model that solves the M/EEG forward problem
+        * Simulate brain sources and corresponding EEG activity
+        * Load and train a neural network to solve the inverse problem
+        * Inspect the performance of the neural network* 
+        
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown

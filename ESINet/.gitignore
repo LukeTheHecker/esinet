@@ -1,0 +1,4 @@
+*.fif
+*.pkl
+*.stc
+*__pycache__

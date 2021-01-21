@@ -2,3 +2,4 @@
 *.pkl
 *.stc
 *__pycache__
+*.ipynb

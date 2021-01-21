@@ -16,7 +16,8 @@ def load_fwd(pth_fwd):
     fwd = mne.read_forward_solution(pth_fwd + '/fsaverage-fwd.fif', verbose=0)
     return fwd
 
-def source_to_sourceEstimate(data, pth_fwd, sfreq=1, subject='fsaverage'):
+def source_to_sourceEstimate(data, pth_fwd, sfreq=1, subject='fsaverage', 
+    simulationInfo=None, tmin=0):
     ''' Takes source data and creates mne.SourceEstimate object
     https://mne.tools/stable/generated/mne.SourceEstimate.html
 
@@ -31,7 +32,7 @@ def source_to_sourceEstimate(data, pth_fwd, sfreq=1, subject='fsaverage'):
     src : mne.SourceEstimate, instance of SourceEstimate.
 
     '''
-    data = np.array(data)
+    data = np.squeeze(np.array(data))
     if len(data.shape) == 1:
         data = np.expand_dims(data, axis=1)
 
@@ -40,6 +41,27 @@ def source_to_sourceEstimate(data, pth_fwd, sfreq=1, subject='fsaverage'):
     if data.shape[0] != number_of_dipoles:
         data = np.transpose(data)
 
+    src = mne.SourceEstimate(data, src_template.vertices, tmin=tmin, tstep=1/sfreq, 
+        subject=subject)
 
-    src = mne.SourceEstimate(data, src_template.vertices, tmin=0, tstep=1/sfreq, subject=subject)
+    if simulationInfo is not None:
+        setattr(src, 'simulationInfo', simulationInfo)
+
+
     return src
+
+def eeg_to_Epochs(data, pth_fwd, info=None):
+    if info is None:
+        info = load_info(pth_fwd)
+    # If only one time point...
+    if data.shape[-1] == 1:
+        # ...set sampling frequency to 1
+        info['sfreq'] = 1
+
+    epochs = mne.EpochsArray(data, info, verbose=0)
+    epochs.set_eeg_reference('average', projection=True, verbose=0)
+
+    return epochs
+
+def rms(x):
+    return np.sqrt(np.mean(np.square(x)))
