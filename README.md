@@ -5,14 +5,17 @@ ESINet let's you solve the EEG inverse problem using ANNs.
 ![ESINet](/assets/ESINet.png)
 Neural network was created [here](http://alexlenail.me/NN-SVG/index.html)
 
-Installation from PyPi:
+## Dependencies:
+* [mne 0.20.5](https://mne.tools/stable/index.html)
+  * Follow the [installation guide](https://mne.tools/stable/install/mne_python.html#installing-mne-python-and-its-dependencies)
+* [Tensorflow 2.4.0](https://www.tensorflow.org/)
+  * Follow the [installation guide](https://www.tensorflow.org/install)
+
+## Installation from PyPi
 
 ```
 pip install ESINet
 ```
-**Dependencies:**
-* [mne 0.20.5](https://mne.tools/stable/index.html)
-* [Tensorflow 2.4.0](https://www.tensorflow.org/)
 
 ## Workflow
 ESINet is a lightweight package that provides all building blocks to use an ANN
