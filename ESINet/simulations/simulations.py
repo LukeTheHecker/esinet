@@ -58,20 +58,24 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
                 }
 
     print(f'\nRun {n_simulations} simulations...')
+
     sources = np.stack(Parallel(n_jobs=n_jobs, backend='loky')(
         delayed(simulate_source)(pos, neighbors, **settings) 
         for i in tqdm(range(n_simulations))))
 
     if not return_raw_data:
-        if return_single_epoch:
+        source_vectors = np.stack([source[0] for source in sources], axis=0)
+        has_temporal_dimension = len(np.squeeze(source_vectors).shape) == 3
+        if return_single_epoch and not has_temporal_dimension:
             print(f'\nConvert simulations to a single instance of mne.SourceEstimate...')
-            source_vectors = np.stack([source[0] for source in sources], axis=0)
             sources = source_to_sourceEstimate(source_vectors, pth_fwd, sfreq=sampleFreq, simulationInfo=sources[0][1]) 
         else:
             print(f'\nConvert simulations to instances of mne.SourceEstimate...')
             sources = Parallel(n_jobs=n_jobs, backend='loky')(
                 delayed(source_to_sourceEstimate)(source[0], pth_fwd, sfreq=sampleFreq, simulationInfo=source[1]) 
                 for source in tqdm(sources))
+    else:
+        sources = np.stack([sources[i][0] for i in range(n_simulations)], axis=0)
             
     return sources
 
@@ -104,7 +108,7 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     '''
     
     # Handle input
-    
+
     # Amplitudes come in nAm
     if isinstance(amplitudes, (list, tuple)):
         amplitudes = [amp* 1e-9  for amp in amplitudes] 
@@ -196,7 +200,6 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     simSettings = dict(scr_center_indices=src_centers, amplitudes=amplitudes, extents=extents, 
         shape=shape, sourceMask=sourceMask, regionGrowing=regionGrowing, durOfTrial=durOfTrial,
         sampleFreq=sampleFreq)
-
 
     return source, simSettings
 
@@ -336,6 +339,13 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
         sources = np.stack([se.data for se in sourceEstimates], axis=0)
         sfreq = sourceEstimates[0].simulationInfo['sampleFreq']
         n_timepoints = sources.shape[-1]
+    elif type(sourceEstimates) == np.ndarray:
+        sources = np.squeeze(sourceEstimates)
+        if len(sources.shape) == 2:
+            sources = np.expand_dims(sources, axis=-1)
+        sfreq = 1
+        print(f'sources.shape={sources.shape}')
+        n_timepoints = sources.shape[-1]
     else:
         msg = f'sourceEstimates must be of type <list> or <mne.source_estimate.SourceEstimate> but is of type <{type(sourceEstimates)}>'
         raise ValueError(msg)
@@ -356,18 +366,23 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
     print(f'\nCreate EEG trials with noise...')
     eeg_trials_noisy = np.stack(Parallel(n_jobs=n_jobs, backend='loky')
         (delayed(create_eeg_helper)(eeg_clean[sample], n_trials, snr, beta) 
-        for sample in tqdm(range(n_samples))))
-    # else:
-    #     eeg_trials_noisy = np.stack([
-    #         create_eeg_helper(eeg_clean[sample], n_trials, snr, beta) 
-    #         for sample in tqdm(range(n_samples))], axis=0)
+        for sample in tqdm(range(n_samples))), axis=0)
+    
+    if n_trials == 1 and len(eeg_trials_noisy.shape) == 2:
+        # Add empty dimension to contain the single trial
+        eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=1)
+
     
     if len(eeg_trials_noisy.shape) == 3:
         eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=-1)
+        
+    if eeg_trials_noisy.shape[2] != n_elec:
+        eeg_trials_noisy = np.swapaxes(eeg_trials_noisy, 1, 2)
 
     if not return_raw_data:
         if return_single_epoch:
             print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
+            print(f'eeg_trials_noisy.shape={eeg_trials_noisy.shape}')
             ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
             epochs = eeg_to_Epochs(ERP_samples_noisy, pth_fwd, info=info)
 

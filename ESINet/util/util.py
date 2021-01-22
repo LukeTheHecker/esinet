@@ -1,15 +1,23 @@
 import pickle as pkl
 import mne
 import numpy as np
-
+import os
 def load_info(pth_fwd):
     with open(pth_fwd + '/info.pkl', 'rb') as file:  
         info = pkl.load(file)
     return info
 
 def load_leadfield(pth_fwd):
-    with open(pth_fwd + '/leadfield.pkl', 'rb') as file:  
-        leadfield = pkl.load(file)
+    ''' Load the leadfield matrix from the path of the forward model.'''
+
+    if os.path.isfile(pth_fwd + '/leadfield.pkl'):
+        with open(pth_fwd + '/leadfield.pkl', 'rb') as file:  
+            leadfield = pkl.load(file)
+    else:
+        fwd = load_fwd(pth_fwd)
+        fwd_fixed = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True,
+                                                use_cps=True, verbose=0)
+        leadfield = fwd_fixed['sol']['data']
     return leadfield[0]
 
 def load_fwd(pth_fwd):
@@ -57,7 +65,7 @@ def eeg_to_Epochs(data, pth_fwd, info=None):
     if data.shape[-1] == 1:
         # ...set sampling frequency to 1
         info['sfreq'] = 1
-
+    print(f'data.shape={data.shape}')
     epochs = mne.EpochsArray(data, info, verbose=0)
     epochs.set_eeg_reference('average', projection=True, verbose=0)
 
