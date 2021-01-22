@@ -2,11 +2,12 @@
 
 ESINet let's you solve the EEG inverse problem using ANNs.
 
+![Alt-Text](/assets/ESINet.png)
+
 Installation from PyPi:
 
 ```
 pip install ESINet
-
 ```
 **Dependencies:**
 * [mne 0.20.5]([mne.tools](https://mne.tools/stable/index.html))
