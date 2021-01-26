@@ -13,7 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/LukeTheHecker/ESINet",
     packages=setuptools.find_packages(),
-    install_requires=['tensorflow','mne', 'scipy', 'colorednoise', 'joblib', 'seaborn', 'mayavi'],
+    install_requires=['tensorflow','mne', 'scipy', 'colorednoise', 'joblib'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

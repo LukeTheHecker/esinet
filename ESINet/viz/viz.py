@@ -1,8 +1,6 @@
 import mne
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-from seaborn.palettes import color_palette; sns.set(font_scale=1.25,style='ticks',context='notebook',font= 'georgia')
 import mayavi
 
 def splot(data, pth_fwd, del_below=0.1, backend='mayavi', title='title', \

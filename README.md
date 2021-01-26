@@ -1,15 +1,21 @@
-# ESINet: Electric source imaging unsing artificial neural networks (ANNs)
+# ESINet: Electric source imaging using artificial neural networks (ANNs)
 
 ESINet let's you solve the EEG inverse problem using ANNs.
 
 ![ESINet](/assets/ESINet.png)
 Neural network was created [here](http://alexlenail.me/NN-SVG/index.html)
 
+<br/><br/>
+
 ## Dependencies:
+* Python >= 3.8.3
 * [mne 0.20.5](https://mne.tools/stable/index.html)
   * Follow the [installation guide](https://mne.tools/stable/install/mne_python.html#installing-mne-python-and-its-dependencies)
 * [Tensorflow 2.4.0](https://www.tensorflow.org/)
   * Follow the [installation guide](https://www.tensorflow.org/install)
+* [Colorednoise](https://github.com/felixpatzelt/colorednoise)
+
+<br/>
 
 ## Installation from PyPi
 
@@ -17,12 +23,28 @@ Neural network was created [here](http://alexlenail.me/NN-SVG/index.html)
 pip install ESINet
 ```
 
-## Workflow
+<br/>
+
+## First steps
+
+Check out one of the [tutorials](tutorials/) to learn how to use the package:
+
+* [Base tutorial](tutorials/tutorial.ipynb): Simulate data and train a ANN to predict some sources. Shows the most important functions of this package and serves as the easiest entry point.
+  
+* [Brainstorm Auditory example](tutorials/brainstorm_auditory_example.ipynb): This tutorial shows you how to use ESINet to predict the sources in word processing data. Code was partially used from the [MNE tutorials](https://mne.tools/stable/auto_tutorials/sample-datasets/plot_brainstorm_auditory.html?highlight=brainstorm)
+ 
+
+
+<br/>
+---
+# Workflow
 ESINet is a lightweight package that provides all building blocks to use an ANN
 to solve the EEG inverse problem. It relies on
 [mne](https://mne.tools/stable/index.html)) to handle all tasks
 related to EEG and [Tensorflow](https://www.tensorflow.org/) to create, train
 and predict with the ANN.
+
+<br/>
 
 ## The forward model
 Knowing how cerebral currents will project to the scalp electrodes requires solving the *forward problem*. Fortunately, this problem has a unique solution! We provide a function to quickly create a *forward model* which supplies all assets required for the following processing steps:
@@ -33,6 +55,8 @@ sampling = 'ico3'
 create_forward_model(pth_fwd, sampling=sampling, info=epochs.info)
 ```
 The sampling defines the number of dipoles in your source model and thereby the resolution of your inverse solution. If you don't have powerful hardware we encourage to leave the sampling at 'ico3'.
+
+<br/>
 
 ## Simulating EEG data
 ANNs that find solutions to the inverse problem need to be trained to infer the dipole moments of your source model given the EEG.
@@ -60,7 +84,9 @@ eeg_sim[sample].average().plot_topomap([0.5])
 a = [sources_sim[sample].plot(hemi=hemi, initial_time=0.5, surface='white', colormap='inferno', figure=mlab.figure(title)) for hemi in ['lh', 'rh']]
 ```
 
-## The EEG inverse problem
+<br/>
+
+## Training
 Now we want to train an ANN to infer sources given EEG data. Since we have simulated all the required data already we just have to load and train a ANN model.
 
 To load our basic model:
@@ -112,10 +138,14 @@ b = [source_predicted.plot(hemi=hemi, initial_time=0.5, surface='white', colorma
 
 ```
 
-## Feedback
+<br/>
+
+# Feedback
 Leave your feedback and bug reports at lukas_hecker@web.de.
 
-## Literature
+<br/>
+
+# Literature
 Cite us using our preprint (publication is in review):
 
 Hecker, L., Rupprecht, R., van Elst, L. T., & Kornmeier, J. (2020). ConvDip: A convolutional neural network for better M/EEG Source Imaging. bioRxiv.
