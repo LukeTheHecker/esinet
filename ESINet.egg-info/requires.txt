@@ -3,5 +3,3 @@ mne
 scipy
 colorednoise
 joblib
-seaborn
-mayavi

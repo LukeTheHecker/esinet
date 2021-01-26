@@ -3,7 +3,7 @@
 ESINet let's you solve the EEG inverse problem using ANNs.
 
 ![ESINet](/assets/ESINet.png)
-Neural network was created [here](http://alexlenail.me/NN-SVG/index.html)
+Neural network design was created [here](http://alexlenail.me/NN-SVG/index.html)
 
 <br/><br/>
 
@@ -33,9 +33,8 @@ Check out one of the [tutorials](tutorials/) to learn how to use the package:
   
 * [Brainstorm Auditory example](tutorials/brainstorm_auditory_example.ipynb): This tutorial shows you how to use ESINet to predict the sources in word processing data. Code was partially used from the [MNE tutorials](https://mne.tools/stable/auto_tutorials/sample-datasets/plot_brainstorm_auditory.html?highlight=brainstorm)
  
-
-
 <br/>
+
 ---
 # Workflow
 ESINet is a lightweight package that provides all building blocks to use an ANN
