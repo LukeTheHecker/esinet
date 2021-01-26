@@ -13,7 +13,7 @@ from ..util import *
 
 def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 3), 
     amplitudes=(5, 10), shape='gaussian', durOfTrial=1, sampleFreq=100, 
-    regionGrowing=True, n_jobs=-1, return_raw_data=False):
+    regionGrowing=True, n_jobs=-1, return_raw_data=False, return_single_epoch=True):
     ''' A wrapper function for the core function "simulate_source" which
     calculates simulations multiple times. 
     Parameters:
@@ -58,17 +58,25 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
                 }
 
     print(f'\nRun {n_simulations} simulations...')
+
     sources = np.stack(Parallel(n_jobs=n_jobs, backend='loky')(
         delayed(simulate_source)(pos, neighbors, **settings) 
         for i in tqdm(range(n_simulations))))
 
     if not return_raw_data:
-        print(f'\nConvert simulations to instances of mne.SourceEstimate...')
-        source_estimates = Parallel(n_jobs=n_jobs, backend='loky')(
-            delayed(source_to_sourceEstimate)(source[0], pth_fwd, sfreq=sampleFreq, simulationInfo=source[1]) 
-            for source in tqdm(sources))
-        sources = source_estimates
-
+        source_vectors = np.stack([source[0] for source in sources], axis=0)
+        has_temporal_dimension = len(np.squeeze(source_vectors).shape) == 3
+        if return_single_epoch and not has_temporal_dimension:
+            print(f'\nConvert simulations to a single instance of mne.SourceEstimate...')
+            sources = source_to_sourceEstimate(source_vectors, pth_fwd, sfreq=sampleFreq, simulationInfo=sources[0][1]) 
+        else:
+            print(f'\nConvert simulations to instances of mne.SourceEstimate...')
+            sources = Parallel(n_jobs=n_jobs, backend='loky')(
+                delayed(source_to_sourceEstimate)(source[0], pth_fwd, sfreq=sampleFreq, simulationInfo=source[1]) 
+                for source in tqdm(sources))
+    else:
+        sources = np.stack([sources[i][0] for i in range(n_simulations)], axis=0)
+            
     return sources
 
 def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes=(5, 10),
@@ -100,7 +108,7 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     '''
     
     # Handle input
-    
+
     # Amplitudes come in nAm
     if isinstance(amplitudes, (list, tuple)):
         amplitudes = [amp* 1e-9  for amp in amplitudes] 
@@ -193,7 +201,6 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
         shape=shape, sourceMask=sourceMask, regionGrowing=regionGrowing, durOfTrial=durOfTrial,
         sampleFreq=sampleFreq)
 
-
     return source, simSettings
 
 def get_pulse(x):
@@ -284,10 +291,13 @@ def add_noise(x, snr, beta=0):
     noise_scaler = rms_x / (rms_noise*snr)
     return x + noise*noise_scaler
 
-
+def rms(x):
+    return np.sqrt(np.mean(np.square(x)))
 
 
 def create_eeg_helper(eeg_sample, n_trials, snr, beta):
+    if type(snr) == tuple or type(snr) == list:
+        snr = random.uniform(*snr)
     # eeg_sample = np.repeat(eeg_sample, n_trials, axis=0)
     eeg_sample = np.repeat(np.expand_dims(eeg_sample, 0), n_trials, axis=0)
 
@@ -298,13 +308,14 @@ def create_eeg_helper(eeg_sample, n_trials, snr, beta):
 
 
 def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
-    return_raw_data=False):
+    return_raw_data=False, return_single_epoch=True):
     ''' Create EEG of specified number of trials based on sources and some SNR.
     Parameters:
     -----------
     sourceEstimates : list, list containing mne.SourceEstimate objects
     pth_fwd : str, path to the forward model files
-    snr : float, desired signal to noise ratio within individual trials
+    snr : tuple/list/float, desired signal to noise ratio within individual 
+        trials. Can be a list or tuple of two floats specifying a range.
     n_trials : int, number of simulated trials
     beta : float, determines the frequency spectrum of the noise added 
         to the signal: power = (1/f)^beta. 
@@ -320,15 +331,33 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
         data (see argument <return_raw_data> to change output).
     '''
     # Unpack the source data from the SourceEstimate objects
-    sources = [se.data for se in sourceEstimates]
+    if type(sourceEstimates) == mne.source_estimate.SourceEstimate:
+        sources = np.transpose(sourceEstimates.data)
+        sfreq = sourceEstimates.simulationInfo['sampleFreq']
+        n_timepoints = 1
+    elif type(sourceEstimates) == list:
+        sources = np.stack([se.data for se in sourceEstimates], axis=0)
+        sfreq = sourceEstimates[0].simulationInfo['sampleFreq']
+        n_timepoints = sources.shape[-1]
+    elif type(sourceEstimates) == np.ndarray:
+        sources = np.squeeze(sourceEstimates)
+        if len(sources.shape) == 2:
+            sources = np.expand_dims(sources, axis=-1)
+        sfreq = 1
+        print(f'sources.shape={sources.shape}')
+        n_timepoints = sources.shape[-1]
+    else:
+        msg = f'sourceEstimates must be of type <list> or <mne.source_estimate.SourceEstimate> but is of type <{type(sourceEstimates)}>'
+        raise ValueError(msg)
+
     # Load some forward model objects
     leadfield = load_leadfield(pth_fwd)
     info = load_info(pth_fwd)
-    info['sfreq'] = sourceEstimates[0].simulationInfo['sampleFreq']
+    info['sfreq'] = sfreq
     
     n_samples = len(sources)
     n_elec = leadfield.shape[0]
-    n_timepoints = sources[0].shape[1]
+    
 
     eeg_clean = np.stack([np.matmul(leadfield, y) for y in sources], axis=0)
 
@@ -337,20 +366,31 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
     print(f'\nCreate EEG trials with noise...')
     eeg_trials_noisy = np.stack(Parallel(n_jobs=n_jobs, backend='loky')
         (delayed(create_eeg_helper)(eeg_clean[sample], n_trials, snr, beta) 
-        for sample in tqdm(range(n_samples))))
-    # else:
-    #     eeg_trials_noisy = np.stack([
-    #         create_eeg_helper(eeg_clean[sample], n_trials, snr, beta) 
-    #         for sample in tqdm(range(n_samples))], axis=0)
+        for sample in tqdm(range(n_samples))), axis=0)
+    
+    if n_trials == 1 and len(eeg_trials_noisy.shape) == 2:
+        # Add empty dimension to contain the single trial
+        eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=1)
+
     
     if len(eeg_trials_noisy.shape) == 3:
         eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=-1)
+        
+    if eeg_trials_noisy.shape[2] != n_elec:
+        eeg_trials_noisy = np.swapaxes(eeg_trials_noisy, 1, 2)
 
     if not return_raw_data:
-        print(f'\nConvert EEG matrices to instances of mne.Epochs...')
-        epochs = Parallel(n_jobs=n_jobs, backend='loky')(
-            delayed(eeg_to_Epochs)(sample, pth_fwd, info=info) 
-            for sample in tqdm(eeg_trials_noisy))
+        if return_single_epoch:
+            print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
+            print(f'eeg_trials_noisy.shape={eeg_trials_noisy.shape}')
+            ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
+            epochs = eeg_to_Epochs(ERP_samples_noisy, pth_fwd, info=info)
+
+        else:
+            print(f'\nConvert EEG matrices to instances of mne.Epochs...')
+            epochs = Parallel(n_jobs=n_jobs, backend='loky')(
+                delayed(eeg_to_Epochs)(sample, pth_fwd, info=info) 
+                for sample in tqdm(eeg_trials_noisy))
     else:
         epochs = eeg_trials_noisy
 

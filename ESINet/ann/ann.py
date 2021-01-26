@@ -8,7 +8,8 @@ from copy import deepcopy
 from ..util import *
 
 
-def get_model(input_dim, output_dim, n_layers=1, n_neurons=128, activation_function='swish'):
+def get_model(input_dim, output_dim, n_layers=1, n_neurons=128, 
+    activation_function='swish'):
     ''' Initialize the neural network model
     Parameters:
     -----------
@@ -37,8 +38,9 @@ def get_model(input_dim, output_dim, n_layers=1, n_neurons=128, activation_funct
     model.summary()
     return model
 
-def train_model(model, sources, eeg, batch_size=200, epochs=100, validation_split=0.1, loss=None, 
-    optimizer=None, metrics=None, device=None, delta=1):
+def train_model(model, sources, eeg, batch_size=200, epochs=100, 
+    validation_split=0.1, loss=None, optimizer=None, metrics=None, 
+    device=None, delta=1):
     ''' Train the neural network with simulated data. Parameters:
     -----------
     model : keras model to be trained (https://keras.io/api/models/model/)

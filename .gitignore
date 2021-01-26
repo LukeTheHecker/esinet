@@ -2,4 +2,5 @@
 *.pkl
 *.stc
 *__pycache__
-*.ipynb
+*temporal_testing.ipynb
+*pypi_package_reminder.md

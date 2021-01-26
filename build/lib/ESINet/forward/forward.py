@@ -3,7 +3,7 @@ import mne
 import pickle as pkl
 import numpy as np
 
-def create_forward_model(savepath, sampling='ico3', info=None):
+def create_forward_model(savepath, sampling='ico3', info=None, verbose=0):
     ''' Create files of the forward model and source model. 
     Parameters:
     ----------
@@ -27,7 +27,7 @@ def create_forward_model(savepath, sampling='ico3', info=None):
         print(f'Model already exists at path {savepath}')
         return
     # Fetch the template files for our forward model
-    fs_dir = mne.datasets.fetch_fsaverage(verbose=0)
+    fs_dir = mne.datasets.fetch_fsaverage(verbose=verbose)
     subjects_dir = os.path.dirname(fs_dir)
 
     # The files live in:
@@ -53,36 +53,36 @@ def create_forward_model(savepath, sampling='ico3', info=None):
     # Create and save Source Model
     src = mne.setup_source_space(subject, spacing=sampling, surface='white',
                                         subjects_dir=subjects_dir, add_dist=False,
-                                        n_jobs=-1, verbose=0)
+                                        n_jobs=-1, verbose=verbose)
 
     src.save('{}\\{}-src.fif'.format(savepath, sampling), overwrite=True)
 
     # Forward Model
     fwd = mne.make_forward_solution(info, trans=trans, src=src,
                                     bem=bem, eeg=True, mindist=5.0, n_jobs=-1,
-                                    verbose=0) 
+                                    verbose=verbose)
     mne.write_forward_solution(savepath+'\\{}-fwd.fif'.format(subject),fwd, 
-                            overwrite=True)
+                            overwrite=True, verbose=verbose)
     # Fixed Orientations
     fwd_fixed = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True,
-                                            use_cps=True, verbose=0)
+                                            use_cps=True, verbose=verbose)
 
     ###############################################################################
     # Create Container for Source Estimate which is needed to plot data later on  #
     noise_cov = mne.compute_covariance(epochs, tmax=0., method=['empirical'], 
-                                    rank=None, verbose=0)
+                                    rank=None, verbose=verbose)
 
     inv = mne.minimum_norm.make_inverse_operator(info, fwd, noise_cov,
-                                        loose=0.2, depth=0.8, verbose=0)
+                                        loose=0.2, depth=0.8, verbose=verbose)
 
     stc, residual = mne.minimum_norm.apply_inverse(evoked, inv, 0.05,
                                 method="dSPM", pick_ori="normal",
-                                return_residual=True, verbose=0)
+                                return_residual=True, verbose=verbose)
 
-    stc.save(savepath+"\\ResSourceEstimate".format(), ftype='stc')
+    stc.save(savepath+"\\ResSourceEstimate".format(), ftype='stc', verbose=verbose)
 
     mne.minimum_norm.write_inverse_operator(savepath+"\\inverse-inv.fif",
-                        inv)
+                        inv, verbose=verbose)
     tris = inv['src'][0]['use_tris']
     # inv.save(, ftype='fif')
             
@@ -92,9 +92,11 @@ def create_forward_model(savepath, sampling='ico3', info=None):
     print(f'shape of leadfield: {leadfield.shape}')
 
     # Load source space file
-    source = mne.read_source_spaces(savepath+"/"+sampling+"-src.fif")
-    pos_left = mne.vertex_to_mni(source[0]['vertno'], hemis=0, subject='fsaverage')
-    pos_right = mne.vertex_to_mni(source[0]['vertno'], hemis=1, subject='fsaverage')
+    source = mne.read_source_spaces(savepath+"/"+sampling+"-src.fif", verbose=verbose)
+    pos_left = mne.vertex_to_mni(source[0]['vertno'], hemis=0, 
+        subject='fsaverage', verbose=verbose)
+    pos_right = mne.vertex_to_mni(source[0]['vertno'], hemis=1, 
+        subject='fsaverage', verbose=verbose)
     pos = np.concatenate([pos_left, pos_right], axis=0)
 
     # save leadfield
@@ -110,7 +112,8 @@ def create_forward_model(savepath, sampling='ico3', info=None):
     fn =f'{savepath}/info.pkl'
     with open(fn, 'wb') as f:
         pkl.dump(info, f)
-    print(f'All files for the forward model were saved to {savepath}')
+    if verbose is not None and verbose!=0:
+        print(f'All files for the forward model were saved to {savepath}')
 
 def get_info():
     # https://mne.tools/stable/generated/mne.create_info.html#mne.create_info
