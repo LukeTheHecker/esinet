@@ -1,5 +1,12 @@
-tensorflow
-mne
+tensorflow>=2.4.1
+mne>=0.22.0
 scipy
 colorednoise
 joblib
+jupyter
+ipykernel
+matplotlib
+pyvista>=0.24
+pyvistaqt>=0.2.0
+vtk>=9.0.1
+tqdm

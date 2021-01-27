@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: ESINet
-Version: 0.0.6
+Version: 0.0.8
 Summary: Solve the M/EEG inverse problem using artificial neural networks with Python 3 and the MNE library.
 Home-page: https://github.com/LukeTheHecker/ESINet
 Author: Lukas Hecker

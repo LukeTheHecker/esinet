@@ -145,15 +145,15 @@ def predict(model, EEG, pth_fwd, leadfield=None, sfreq=100):
         leadfield = load_leadfield(pth_fwd)
     n_chan, n_dipoles = leadfield.shape
 
-    if type(EEG) == mne.epochs.EvokedArray:
+    if isinstance(EEG, mne.epochs.EvokedArray):
         sfreq = EEG.info['sfreq']
         tmin = EEG.tmin
         EEG = np.squeeze(EEG.data)
-    elif type(EEG) == mne.epochs.EvokedArray or type(EEG) == mne.epochs.EpochsFIF:
+    elif isinstance(EEG, (mne.epochs.EpochsFIF, mne.epochs.EpochsArray)):
         sfreq = EEG.info['sfreq']
         tmin = EEG.tmin
         EEG = np.squeeze(EEG.average().data)
-    elif type(EEG) == np.ndarray:
+    elif isinstance(EEG, np.ndarray):
         sfreq = 1
         tmin = 0
         EEG = np.squeeze(np.array(EEG))
