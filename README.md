@@ -75,12 +75,10 @@ You can visualize the simulated data with this code block:
 %matplotlib qt
 sample = 0  # index of the simulation
 title = f'Simulation {sample}'
-# ERP Plot
-eeg_sim[sample].average().plot()
 # Topographic plot
 eeg_sim[sample].average().plot_topomap([0.5])
 # Source plot
-a = [sources_sim[sample].plot(hemi=hemi, initial_time=0.5, surface='white', colormap='inferno', figure=mlab.figure(title)) for hemi in ['lh', 'rh']]
+sources_sim.plot(hemi='both', initial_time=sample, surface='white', colormap='inferno', title=title, time_viewer=False)
 ```
 
 <br/>
@@ -111,21 +109,19 @@ First, we have to simulate some data for evaluation:
 sources_eval = run_simulations(pth_fwd, 1, durOfTrial=0)
 # Simulate corresponding EEG
 eeg_eval = create_eeg(sources_eval, pth_fwd)
-# Calculate average of the simulated trials (i.e. the event-related potential (ERP))
-eeg_sample = np.squeeze( np.mean(eeg_eval, axis=1) )
 ```
 Next, we use the trained ANN model to predict the source given the EEG.
 
 ```
 # Predict
-source_predicted = predict(model, eeg_sample, pth_fwd)
+source_predicted = predict(model, eeg_eval, pth_fwd)
 ```
 
 Now let's visualize the result:
 ```
 # Plot ground truth source...
 title = f'Ground Truth'
-a = [sources_eval[0].plot(hemi=hemi, initial_time=0.5, surface='white', colormap='inferno', figure=mlab.figure(title)) for hemi in ['lh', 'rh']]
+sources_eval.plot(hemi='both', initial_time=0.5, surface='white', colormap='inferno', title=title, time_viewer=False)
 
 # Plot the simulated EEG
 title = f'Simulated EEG'
@@ -133,7 +129,7 @@ eeg_eval[0].average().plot_topomap([0], title=title)
 
 # Plot the predicted source
 title = f'ConvDip Prediction'
-b = [source_predicted.plot(hemi=hemi, initial_time=0.5, surface='white', colormap='inferno', figure=mlab.figure(title)) for hemi in ['lh', 'rh']]
+source_predicted.plot(hemi='both', initial_time=0.5, surface='white', colormap='inferno', title=title, time_viewer=False)
 
 ```
 
