@@ -126,11 +126,12 @@ def get_info():
     return info
 
 def create_fake_epochs(info):
-        n_time = 1000
-        numberOfChannels = len(info.ch_names)
-        fake_data = np.random.randn(5, numberOfChannels, n_time)
-        epochs = mne.EpochsArray(fake_data, info, verbose=0)
-        epochs.set_eeg_reference('average', projection=True, verbose=0)
-        evoked = epochs.average()
-        evoked.set_eeg_reference('average', projection=True, verbose=0)
-        return epochs, evoked
+    n_time = 1000
+    numberOfChannels = len(info.ch_names)
+    fake_data = np.random.randn(5, numberOfChannels, n_time)
+    epochs = mne.EpochsArray(fake_data, info, verbose=0)
+    epochs.set_eeg_reference('average', projection=True, verbose=0)
+    evoked = epochs.average()
+    evoked.set_eeg_reference('average', projection=True, verbose=0)
+    
+    return epochs, evoked
