@@ -9,15 +9,21 @@ Neural network design was created [here](http://alexlenail.me/NN-SVG/index.html)
 
 ## Dependencies:
 * Python >= 3.8.3
-* [mne 0.20.5](https://mne.tools/stable/index.html)
+* [mne 0.22.0](https://mne.tools/stable/index.html)
   * Follow the [installation guide](https://mne.tools/stable/install/mne_python.html#installing-mne-python-and-its-dependencies)
-* [Tensorflow 2.4.0](https://www.tensorflow.org/)
+* [Tensorflow>=2.4.1](https://www.tensorflow.org/)
   * Follow the [installation guide](https://www.tensorflow.org/install)
 * [Colorednoise](https://github.com/felixpatzelt/colorednoise)
+* [joblib](https://joblib.readthedocs.io/en/latest/#)
+* [pyvista>=0.24](https://docs.pyvista.org/)
+* [pyvistaqt>=0.2.0](https://qtdocs.pyvista.org/)
+* [tqdm](https://github.com/tqdm/tqdm)
 
 <br/>
 
 ## Installation from PyPi
+Use [pip](https://pip.pypa.io/en/stable/) to install ESINet and all its
+dependencies from [PyPi](https://pypi.org/):
 
 ```
 pip install ESINet
