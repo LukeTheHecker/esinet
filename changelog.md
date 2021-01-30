@@ -1,6 +1,10 @@
 # Changelog
 
-
+## 20.01.2021
+* Minor changes with indentation in forward.py
+* Removed unused imports from tutorial notebooks
+* removed a unused cell in tutorial.ipynb
+* 
 
 ## 0.0.7 - 28.01.2021
 * added required package: ['tensorflow>=2.4.1','mne>=0.22.0', 'scipy',
