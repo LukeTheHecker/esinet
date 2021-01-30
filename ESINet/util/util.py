@@ -2,6 +2,9 @@ import pickle as pkl
 import mne
 import numpy as np
 import os
+from .. import simulations
+# from ..simulations import get_triangle_neighbors
+
 def load_info(pth_fwd):
     with open(pth_fwd + '/info.pkl', 'rb') as file:  
         info = pkl.load(file)
@@ -23,6 +26,17 @@ def load_leadfield(pth_fwd):
 def load_fwd(pth_fwd):
     fwd = mne.read_forward_solution(pth_fwd + '/fsaverage-fwd.fif', verbose=0)
     return fwd
+
+def load_neighbors(pth_fwd):
+    # Load neighbor matrix
+    fwd_file = os.listdir(pth_fwd)[np.where(['-fwd.fif' in list_of_files 
+        for  list_of_files in os.listdir(pth_fwd)])[0][0]]
+
+    fwd = mne.read_forward_solution(pth_fwd + fwd_file, verbose=0)
+    tris_lr = [fwd['src'][0]['use_tris'], fwd['src'][1]['use_tris']]
+    neighbors = simulations.get_triangle_neighbors(tris_lr)
+    neighbors = np.array([np.array(d) for d in neighbors])
+    return neighbors
 
 def source_to_sourceEstimate(data, pth_fwd, sfreq=1, subject='fsaverage', 
     simulationInfo=None, tmin=0):
