@@ -42,7 +42,7 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
     neighbors = util.load_neighbors(pth_fwd)
     
     # Load dipole positions in
-    with open(pth_fwd + '/pos.pkl', 'rb') as file:  
+    with open(pth_fwd + '\\pos.pkl', 'rb') as file:  # '/pos.pkl' hat to change mm_2021-05-21
         pos = pkl.load(file)[0]
     
     # perform simulations
