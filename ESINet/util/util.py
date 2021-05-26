@@ -13,8 +13,8 @@ def load_info(pth_fwd):
 def load_leadfield(pth_fwd):
     ''' Load the leadfield matrix from the path of the forward model.'''
 
-    if os.path.isfile(pth_fwd + '/leadfield.pkl'):
-        with open(pth_fwd + '/leadfield.pkl', 'rb') as file:  
+    if os.path.isfile(pth_fwd + '\\leadfield.pkl'): # '/<filename>.pkl' hat to change mm_2021-05-21
+        with open(pth_fwd + '\\leadfield.pkl', 'rb') as file:  # '/<filename>.pkl' hat to change mm_2021-05-21
             leadfield = pkl.load(file)
     else:
         fwd = load_fwd(pth_fwd)
@@ -24,7 +24,7 @@ def load_leadfield(pth_fwd):
     return leadfield[0]
 
 def load_fwd(pth_fwd):
-    fwd = mne.read_forward_solution(pth_fwd + '/fsaverage-fwd.fif', verbose=0)
+    fwd = mne.read_forward_solution(pth_fwd + '\\fsaverage-fwd.fif', verbose=0) # '/<filename>.pkl' hat to change mm_2021-05-21
     return fwd
 
 def load_neighbors(pth_fwd):
@@ -58,7 +58,7 @@ def source_to_sourceEstimate(data, pth_fwd, sfreq=1, subject='fsaverage',
     if len(data.shape) == 1:
         data = np.expand_dims(data, axis=1)
 
-    src_template = mne.read_source_estimate(pth_fwd + "/ResSourceEstimate-lh.stc")
+    src_template = mne.read_source_estimate(pth_fwd + "\\ResSourceEstimate-lh.stc") # '/<filename>.pkl' hat to change mm_2021-05-21
     number_of_dipoles = len(src_template.vertices[0]) + len(src_template.vertices[1])
     if data.shape[0] != number_of_dipoles:
         data = np.transpose(data)
