@@ -1,4 +1,9 @@
 # Changelog
+
+## 0.0.10 08.06.2021
+* Changed progress bar to juypter mode
+* added option to have mixed gaussian and flat source shapes for higher simulation diversity
+
 ## 0.0.9 11.02.2021
 * minor changes
 

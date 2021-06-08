@@ -19,4 +19,5 @@ ESINet/tests/unit_tests.py
 ESINet/util/__init__.py
 ESINet/util/util.py
 ESINet/viz/__init__.py
+ESINet/viz/cmaps.py
 ESINet/viz/viz.py

@@ -5,14 +5,15 @@ import os
 from copy import deepcopy
 import mne
 import pickle as pkl
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 import colorednoise as cn
 import pickle as pkl
 from joblib import Parallel, delayed
-from ..util import *
+from .. import util
+# from ..util import source_to_sourceEstimate, load_leadfield, load_info, eeg_to_Epochs
 
 def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 3), 
-    amplitudes=(5, 10), shape='gaussian', durOfTrial=1, sampleFreq=100, 
+    amplitudes=(5, 10), shape='both', durOfTrial=1, sampleFreq=100, 
     regionGrowing=True, n_jobs=-1, return_raw_data=False, return_single_epoch=True):
     ''' A wrapper function for the core function "simulate_source" which
     calculates simulations multiple times. 
@@ -36,13 +37,10 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
 
     if not pth_fwd.endswith('/'):
         pth_fwd += '/'
+    
     # Load neighbor matrix
-    fwd_file = os.listdir(pth_fwd)[np.where(['-fwd.fif' in list_of_files 
-        for  list_of_files in os.listdir(pth_fwd)])[0][0]]
-
-    fwd = mne.read_forward_solution(pth_fwd + fwd_file, verbose=0)
-    tris_lr = [fwd['src'][0]['use_tris'], fwd['src'][1]['use_tris']]
-    neighbors = get_triangle_neighbors(tris_lr)
+    neighbors = util.load_neighbors(pth_fwd)
+    
     # Load dipole positions in
     with open(pth_fwd + '/pos.pkl', 'rb') as file:  
         pos = pkl.load(file)[0]
@@ -66,13 +64,14 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
     if not return_raw_data:
         source_vectors = np.stack([source[0] for source in sources], axis=0)
         has_temporal_dimension = len(np.squeeze(source_vectors).shape) == 3
+        print(f'has_temporal_dimension:{has_temporal_dimension}\nreturn_single_epoch:{return_single_epoch}')
         if return_single_epoch and not has_temporal_dimension:
             print(f'\nConvert simulations to a single instance of mne.SourceEstimate...')
-            sources = source_to_sourceEstimate(source_vectors, pth_fwd, sfreq=sampleFreq, simulationInfo=sources[0][1]) 
+            sources = util.source_to_sourceEstimate(source_vectors, pth_fwd, sfreq=sampleFreq, simulationInfo=sources[0][1]) 
         else:
             print(f'\nConvert simulations to instances of mne.SourceEstimate...')
             sources = Parallel(n_jobs=n_jobs, backend='loky')(
-                delayed(source_to_sourceEstimate)(source[0], pth_fwd, sfreq=sampleFreq, simulationInfo=source[1]) 
+                delayed(util.source_to_sourceEstimate)(source[0], pth_fwd, sfreq=sampleFreq, simulationInfo=source[1]) 
                 for source in tqdm(sources))
     else:
         sources = np.stack([sources[i][0] for i in range(n_simulations)], axis=0)
@@ -80,7 +79,7 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
     return sources
 
 def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes=(5, 10),
-    shape='gaussian', durOfTrial=1, sampleFreq=100, regionGrowing=True):
+    shape='both', durOfTrial=1, sampleFreq=100, regionGrowing=True):
     ''' Returns a vector containing the dipole currents. Requires only a dipole 
     position list and the simulation settings.
 
@@ -97,7 +96,7 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
         specifies the neighborhood order (see Grova et al., 2006), otherwise the diameter in mm. Can be a single number or a 
         list of two numbers specifying a range.
     amplitudes : int/float/tuple/list, the current of the source in nAm
-    shape : str, How the amplitudes evolve over space. Can be 'gaussian' or 'flat' (i.e. uniform).
+    shape : str, How the amplitudes evolve over space. Can be 'gaussian' or 'flat' (i.e. uniform) or 'both'.
     durOfTrial : int/float, specifies the duration of a trial.
     sampleFreq : int, specifies the sample frequency of the data.
     Return:
@@ -148,7 +147,17 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     # If n_sources is a range:
     if isinstance(n_sources, (tuple, list)):
         n_sources = random.randrange(*n_sources)
-  
+
+    if shape == 'both':
+        shapes = ['gaussian', 'flat']*n_sources
+        np.random.shuffle(shapes)
+        shapes = shapes[:n_sources]
+        if type(shapes) == str:
+            shapes = [shapes]
+
+    elif shape == 'gaussian' or shape == 'flat':
+        shapes = [shape] * n_sources
+
     if isinstance(extents, (tuple, list)):
         extents = [random.randrange(*extents) for _ in range(n_sources)]
     else:
@@ -166,8 +175,8 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     source = np.zeros((pos.shape[0]))
     
     ##############################################
-    
-    for i, src_center in enumerate(src_centers):
+    # Loop through source centers (i.e. seeds of source positions)
+    for i, (src_center, shape) in enumerate(zip(src_centers, shapes)):
         # Smoothing and amplitude assignment
         if regionGrowing:
             d = get_n_order_indices(extents[i], src_center, neighbors)
@@ -222,17 +231,15 @@ def get_n_order_indices(order, pick_idx, neighbors):
     ''' Iteratively performs region growing by selecting neighbors of 
     neighbors for <order> iterations.
     '''
-    if order == 0:
-        return pick_idx
-    flatten = lambda t: [item for sublist in t for item in sublist]
+    current_indices = np.array([pick_idx])
 
-    current_indices = [pick_idx]
-    for cnt in range(order):
-        # current_indices = list(np.array( current_indices ).flatten())
-        new_indices = [neighbors[i] for i in current_indices]
-        new_indices = flatten( new_indices )
-        current_indices.extend(new_indices)
-    return current_indices
+    if order == 0:
+        return current_indices
+
+    for _ in range(order):
+        current_indices = np.append(current_indices, np.concatenate(neighbors[current_indices]))
+
+    return np.unique(np.array(current_indices))
 
 def gaussian(x, mu, sig):
     return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
@@ -351,8 +358,8 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
         raise ValueError(msg)
 
     # Load some forward model objects
-    leadfield = load_leadfield(pth_fwd)
-    info = load_info(pth_fwd)
+    leadfield = util.load_leadfield(pth_fwd)
+    info = util.load_info(pth_fwd)
     info['sfreq'] = sfreq
     
     n_samples = len(sources)
@@ -384,12 +391,12 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
             print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
             print(f'eeg_trials_noisy.shape={eeg_trials_noisy.shape}')
             ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
-            epochs = eeg_to_Epochs(ERP_samples_noisy, pth_fwd, info=info)
+            epochs = util.eeg_to_Epochs(ERP_samples_noisy, pth_fwd, info=info)
 
         else:
             print(f'\nConvert EEG matrices to instances of mne.Epochs...')
             epochs = Parallel(n_jobs=n_jobs, backend='loky')(
-                delayed(eeg_to_Epochs)(sample, pth_fwd, info=info) 
+                delayed(util.eeg_to_Epochs)(sample, pth_fwd, info=info) 
                 for sample in tqdm(eeg_trials_noisy))
     else:
         epochs = eeg_trials_noisy

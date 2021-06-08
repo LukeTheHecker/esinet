@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: ESINet
-Version: 0.0.8
+Version: 0.0.10
 Summary: Solve the M/EEG inverse problem using artificial neural networks with Python 3 and the MNE library.
 Home-page: https://github.com/LukeTheHecker/ESINet
 Author: Lukas Hecker
@@ -17,15 +17,21 @@ Description: # ESINet: Electric source imaging using artificial neural networks 
         
         ## Dependencies:
         * Python >= 3.8.3
-        * [mne 0.20.5](https://mne.tools/stable/index.html)
+        * [mne 0.22.0](https://mne.tools/stable/index.html)
           * Follow the [installation guide](https://mne.tools/stable/install/mne_python.html#installing-mne-python-and-its-dependencies)
-        * [Tensorflow 2.4.0](https://www.tensorflow.org/)
+        * [Tensorflow>=2.4.1](https://www.tensorflow.org/)
           * Follow the [installation guide](https://www.tensorflow.org/install)
         * [Colorednoise](https://github.com/felixpatzelt/colorednoise)
+        * [joblib](https://joblib.readthedocs.io/en/latest/#)
+        * [pyvista>=0.24](https://docs.pyvista.org/)
+        * [pyvistaqt>=0.2.0](https://qtdocs.pyvista.org/)
+        * [tqdm](https://github.com/tqdm/tqdm)
         
         <br/>
         
         ## Installation from PyPi
+        Use [pip](https://pip.pypa.io/en/stable/) to install ESINet and all its
+        dependencies from [PyPi](https://pypi.org/):
         
         ```
         pip install ESINet
@@ -83,12 +89,10 @@ Description: # ESINet: Electric source imaging using artificial neural networks 
         %matplotlib qt
         sample = 0  # index of the simulation
         title = f'Simulation {sample}'
-        # ERP Plot
-        eeg_sim[sample].average().plot()
         # Topographic plot
         eeg_sim[sample].average().plot_topomap([0.5])
         # Source plot
-        a = [sources_sim[sample].plot(hemi=hemi, initial_time=0.5, surface='white', colormap='inferno', figure=mlab.figure(title)) for hemi in ['lh', 'rh']]
+        sources_sim.plot(hemi='both', initial_time=sample, surface='white', colormap='inferno', title=title, time_viewer=False)
         ```
         
         <br/>
@@ -119,21 +123,19 @@ Description: # ESINet: Electric source imaging using artificial neural networks 
         sources_eval = run_simulations(pth_fwd, 1, durOfTrial=0)
         # Simulate corresponding EEG
         eeg_eval = create_eeg(sources_eval, pth_fwd)
-        # Calculate average of the simulated trials (i.e. the event-related potential (ERP))
-        eeg_sample = np.squeeze( np.mean(eeg_eval, axis=1) )
         ```
         Next, we use the trained ANN model to predict the source given the EEG.
         
         ```
         # Predict
-        source_predicted = predict(model, eeg_sample, pth_fwd)
+        source_predicted = predict(model, eeg_eval, pth_fwd)
         ```
         
         Now let's visualize the result:
         ```
         # Plot ground truth source...
         title = f'Ground Truth'
-        a = [sources_eval[0].plot(hemi=hemi, initial_time=0.5, surface='white', colormap='inferno', figure=mlab.figure(title)) for hemi in ['lh', 'rh']]
+        sources_eval.plot(hemi='both', initial_time=0.5, surface='white', colormap='inferno', title=title, time_viewer=False)
         
         # Plot the simulated EEG
         title = f'Simulated EEG'
@@ -141,7 +143,7 @@ Description: # ESINet: Electric source imaging using artificial neural networks 
         
         # Plot the predicted source
         title = f'ConvDip Prediction'
-        b = [source_predicted.plot(hemi=hemi, initial_time=0.5, surface='white', colormap='inferno', figure=mlab.figure(title)) for hemi in ['lh', 'rh']]
+        source_predicted.plot(hemi='both', initial_time=0.5, surface='white', colormap='inferno', title=title, time_viewer=False)
         
         ```
         

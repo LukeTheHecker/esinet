@@ -5,7 +5,7 @@ import os
 from copy import deepcopy
 import mne
 import pickle as pkl
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 import colorednoise as cn
 import pickle as pkl
 from joblib import Parallel, delayed
@@ -13,7 +13,7 @@ from .. import util
 # from ..util import source_to_sourceEstimate, load_leadfield, load_info, eeg_to_Epochs
 
 def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 3), 
-    amplitudes=(5, 10), shape='gaussian', durOfTrial=1, sampleFreq=100, 
+    amplitudes=(5, 10), shape='both', durOfTrial=1, sampleFreq=100, 
     regionGrowing=True, n_jobs=-1, return_raw_data=False, return_single_epoch=True):
     ''' A wrapper function for the core function "simulate_source" which
     calculates simulations multiple times. 
@@ -79,7 +79,7 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
     return sources
 
 def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes=(5, 10),
-    shape='gaussian', durOfTrial=1, sampleFreq=100, regionGrowing=True):
+    shape='both', durOfTrial=1, sampleFreq=100, regionGrowing=True):
     ''' Returns a vector containing the dipole currents. Requires only a dipole 
     position list and the simulation settings.
 
@@ -96,7 +96,7 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
         specifies the neighborhood order (see Grova et al., 2006), otherwise the diameter in mm. Can be a single number or a 
         list of two numbers specifying a range.
     amplitudes : int/float/tuple/list, the current of the source in nAm
-    shape : str, How the amplitudes evolve over space. Can be 'gaussian' or 'flat' (i.e. uniform).
+    shape : str, How the amplitudes evolve over space. Can be 'gaussian' or 'flat' (i.e. uniform) or 'both'.
     durOfTrial : int/float, specifies the duration of a trial.
     sampleFreq : int, specifies the sample frequency of the data.
     Return:
@@ -147,7 +147,17 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     # If n_sources is a range:
     if isinstance(n_sources, (tuple, list)):
         n_sources = random.randrange(*n_sources)
-  
+
+    if shape == 'both':
+        shapes = ['gaussian', 'flat']*n_sources
+        np.random.shuffle(shapes)
+        shapes = shapes[:n_sources]
+        if type(shapes) == str:
+            shapes = [shapes]
+
+    elif shape == 'gaussian' or shape == 'flat':
+        shapes = [shape] * n_sources
+
     if isinstance(extents, (tuple, list)):
         extents = [random.randrange(*extents) for _ in range(n_sources)]
     else:
@@ -166,7 +176,7 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     
     ##############################################
     # Loop through source centers (i.e. seeds of source positions)
-    for i, src_center in enumerate(src_centers):
+    for i, (src_center, shape) in enumerate(zip(src_centers, shapes)):
         # Smoothing and amplitude assignment
         if regionGrowing:
             d = get_n_order_indices(extents[i], src_center, neighbors)

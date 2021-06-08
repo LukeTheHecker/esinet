@@ -4,8 +4,8 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="ESINet", # Replace with your own username
-    version="0.0.9",
+    name="ESINet",
+    version="0.0.10",
     author="Lukas Hecker",
     author_email="lukas_hecker@web.de",
     description="Solve the M/EEG inverse problem using artificial neural networks with Python 3 and the MNE library.",
