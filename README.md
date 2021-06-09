@@ -147,6 +147,16 @@ Leave your feedback and bug reports at lukas_hecker@web.de.
 <br/>
 
 # Literature
-Cite us using our preprint (publication is in review):
+Please cite us with this publication:
 
-Hecker, L., Rupprecht, R., van Elst, L. T., & Kornmeier, J. (2020). ConvDip: A convolutional neural network for better M/EEG Source Imaging. bioRxiv.
+@ARTICLE{10.3389/fnins.2021.569918,
+AUTHOR={Hecker, Lukas and Rupprecht, Rebekka and Tebartz Van Elst, Ludger and Kornmeier, Jürgen},   
+TITLE={ConvDip: A Convolutional Neural Network for Better EEG Source Imaging},      
+JOURNAL={Frontiers in Neuroscience},      
+VOLUME={15},      
+PAGES={533},     
+YEAR={2021},      
+URL={https://www.frontiersin.org/article/10.3389/fnins.2021.569918},       
+DOI={10.3389/fnins.2021.569918},      
+ISSN={1662-453X}
+}
