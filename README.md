@@ -1,6 +1,8 @@
 # ESINet: Electric source imaging using artificial neural networks (ANNs)
 
-ESINet let's you solve the EEG inverse problem using ANNs.
+ESINet let's you solve the EEG inverse problem using ANNs. 
+
+It is based on our publication: [ConvDip: A Convolutional Neural Network for Better EEG Source Imaging](https://www.frontiersin.org/articles/10.3389/fnins.2021.569918/full)
 
 ![ESINet](/assets/ESINet.png)
 Neural network design was created [here](http://alexlenail.me/NN-SVG/index.html)
