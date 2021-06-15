@@ -79,7 +79,7 @@ def eeg_to_Epochs(data, pth_fwd, info=None):
     if data.shape[-1] == 1:
         # ...set sampling frequency to 1
         info['sfreq'] = 1
-    print(f'data.shape={data.shape}')
+    # print(f'data.shape={data.shape}')
     epochs = mne.EpochsArray(data, info, verbose=0)
     epochs.set_eeg_reference('average', projection=True, verbose=0)
 

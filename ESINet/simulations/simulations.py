@@ -325,7 +325,7 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
         trials. Can be a list or tuple of two floats specifying a range.
     n_trials : int, number of simulated trials
     beta : float, determines the frequency spectrum of the noise added 
-        to the signal: power = (1/f)^beta. 
+        to the signal: power = 1/f^beta. 
         0 will yield white noise, 
         1 will yield pink noise (1/f spectrum)
     n_jobs : int, Number of jobs to run in parallel. 

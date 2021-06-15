@@ -6,7 +6,7 @@ joblib
 jupyter
 ipykernel
 matplotlib
-pyvista>=0.24
-pyvistaqt>=0.2.0
+pyvista>=0.27.4
+pyvistaqt>=0.3.0
 vtk>=9.0.1
 tqdm

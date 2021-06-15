@@ -270,7 +270,6 @@ def get_triangle_neighbors(tris_lr):
                 neighbors[idx] = list(filter(lambda a: a != idx, neighbors[idx]))
             # Remove duplicates
             neighbors[idx] = list(np.unique(neighbors[idx]))
-            # print(f'idx {idx} found in triangles: {neighbors[idx]}') 
     return neighbors
 
 def add_noise(x, snr, beta=0):
@@ -351,7 +350,6 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
         if len(sources.shape) == 2:
             sources = np.expand_dims(sources, axis=-1)
         sfreq = 1
-        print(f'sources.shape={sources.shape}')
         n_timepoints = sources.shape[-1]
     else:
         msg = f'sourceEstimates must be of type <list> or <mne.source_estimate.SourceEstimate> but is of type <{type(sourceEstimates)}>'
@@ -389,7 +387,6 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
     if not return_raw_data:
         if return_single_epoch:
             print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
-            print(f'eeg_trials_noisy.shape={eeg_trials_noisy.shape}')
             ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
             epochs = util.eeg_to_Epochs(ERP_samples_noisy, pth_fwd, info=info)
 

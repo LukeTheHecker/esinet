@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.12 15.06.2021
+* Made tutorial notebook clearer and minor changes
+
+## 0.0.11 08.06.2021
+* Changed dependencies to be more rigid
+
 ## 0.0.10 08.06.2021
 * Changed progress bar to juypter mode
 * added option to have mixed gaussian and flat source shapes for higher simulation diversity

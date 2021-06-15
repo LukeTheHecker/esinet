@@ -106,6 +106,7 @@ def train_model(model, sources, eeg, batch_size=200, epochs=100,
     # Early stopping
     es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', \
         mode='min', verbose=1, patience=25, restore_best_weights=True)
+        
     if optimizer is None:
         optimizer = tf.keras.optimizers.Adam(lr=0.001)
     if loss is None:
