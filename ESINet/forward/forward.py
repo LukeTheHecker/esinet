@@ -115,14 +115,14 @@ def create_forward_model(savepath, sampling='ico3', info=None, verbose=0):
     if verbose is not None and verbose!=0:
         print(f'All files for the forward model were saved to {savepath}')
 
-def get_info():
+def get_info(kind='easycap-M10'):
     # https://mne.tools/stable/generated/mne.create_info.html#mne.create_info
     # https://mne.tools/stable/auto_tutorials/simulation/plot_creating_data_structures.html
 
-    montage = mne.channels.make_standard_montage('easycap-M10')
+    montage = mne.channels.make_standard_montage(kind)
     sfreq = 1000 
     info = mne.create_info(montage.ch_names, sfreq, ch_types=['eeg']*len(montage.ch_names), verbose=0)
-    info.set_montage('easycap-M10')
+    info.set_montage(kind)
     return info
 
 def create_fake_epochs(info):
