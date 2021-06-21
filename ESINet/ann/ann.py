@@ -126,14 +126,14 @@ def train_model(model, sources, eeg, batch_size=200, epochs=100,
                 validation_split=validation_split, verbose = 2, callbacks=[es])
     return model, history
 
-def predict(model, EEG, pth_fwd, leadfield=None, sfreq=100):
+def predict(model, EEG, fwd):
     ''' 
     Parameters:
     -----------
     model : keras model
     EEG : numpy.ndarray, shape (timepoints, electrodes), EEG data to infer sources from 
     leadfield : numpy.ndarray, the leadfiled matrix
-    pth_fwd : str, path to forward model
+    fwd : mne.Forward, the mne Forward model object
     dtype : str, either of:
         'raw' : will return the source as a raw numpy array 
         'SourceEstimate' or 'SE' : will return a mne.SourceEstimate object
@@ -142,8 +142,8 @@ def predict(model, EEG, pth_fwd, leadfield=None, sfreq=100):
     -------
     outsource : either numpy.ndarray (if dtype='raw') or mne.SourceEstimate instance
     '''
-    if leadfield is None:
-        leadfield = load_leadfield(pth_fwd)
+    fwd_fixed, leadfield, pos, tris = unpack_fwd(fwd)
+  
     n_chan, n_dipoles = leadfield.shape
 
     if isinstance(EEG, mne.epochs.EvokedArray):
@@ -180,7 +180,7 @@ def predict(model, EEG, pth_fwd, leadfield=None, sfreq=100):
     source_predicted = model.predict(EEG_prepd)
     # Scale ConvDips prediction
     source_predicted_scaled = np.squeeze(np.stack([solve_p(source_frame, EEG_frame, leadfield) for source_frame, EEG_frame in zip(source_predicted, EEG)], axis=0))   
-    predicted_source_estimate = source_to_sourceEstimate(np.squeeze(source_predicted_scaled), pth_fwd, sfreq=sfreq, tmin=tmin)
+    predicted_source_estimate = source_to_sourceEstimate(np.squeeze(source_predicted_scaled), fwd, sfreq=sfreq, tmin=tmin)
 
     return predicted_source_estimate
 

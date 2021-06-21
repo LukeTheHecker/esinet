@@ -12,7 +12,7 @@ from joblib import Parallel, delayed
 from .. import util
 # from ..util import source_to_sourceEstimate, load_leadfield, load_info, eeg_to_Epochs
 
-def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 3), 
+def run_simulations(fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 3), 
     amplitudes=(5, 10), shape='both', durOfTrial=1, sampleFreq=100, 
     regionGrowing=True, n_jobs=-1, return_raw_data=False, return_single_epoch=True):
     ''' A wrapper function for the core function "simulate_source" which
@@ -35,16 +35,10 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
         objects or raw arrays (see <return_raw_data> argument)
     '''
 
-    if not pth_fwd.endswith('/'):
-        pth_fwd += '/'
-    
-    # Load neighbor matrix
-    neighbors = util.load_neighbors(pth_fwd)
-    
-    # Load dipole positions in
-    with open(pth_fwd + '/pos.pkl', 'rb') as file:  
-        pos = pkl.load(file)[0]
-    
+    # Get the necessary data structures from the mne.Forward object
+    _, _, pos, _ = util.unpack_fwd(fwd)
+    print(f'pos.shape={pos.shape}')
+
     # perform simulations
     settings = {'n_sources':n_sources,
                 'extents': extents, 
@@ -58,7 +52,7 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
     print(f'\nRun {n_simulations} simulations...')
 
     sources = np.stack(Parallel(n_jobs=n_jobs, backend='loky')(
-        delayed(simulate_source)(pos, neighbors, **settings) 
+        delayed(simulate_source)(pos, **settings) 
         for i in tqdm(range(n_simulations))))
 
     if not return_raw_data:
@@ -67,18 +61,18 @@ def run_simulations(pth_fwd, n_simulations=10000, n_sources=(1, 5), extents=(2, 
         print(f'has_temporal_dimension:{has_temporal_dimension}\nreturn_single_epoch:{return_single_epoch}')
         if return_single_epoch and not has_temporal_dimension:
             print(f'\nConvert simulations to a single instance of mne.SourceEstimate...')
-            sources = util.source_to_sourceEstimate(source_vectors, pth_fwd, sfreq=sampleFreq, simulationInfo=sources[0][1]) 
+            sources = util.source_to_sourceEstimate(source_vectors, fwd, sfreq=sampleFreq, simulationInfo=sources[0][1]) 
         else:
             print(f'\nConvert simulations to instances of mne.SourceEstimate...')
             sources = Parallel(n_jobs=n_jobs, backend='loky')(
-                delayed(util.source_to_sourceEstimate)(source[0], pth_fwd, sfreq=sampleFreq, simulationInfo=source[1]) 
+                delayed(util.source_to_sourceEstimate)(source[0], fwd, sfreq=sampleFreq, simulationInfo=source[1]) 
                 for source in tqdm(sources))
     else:
         sources = np.stack([sources[i][0] for i in range(n_simulations)], axis=0)
             
     return sources
 
-def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes=(5, 10),
+def simulate_source(pos, n_sources=(1, 5), extents=(2, 3), amplitudes=(5, 10),
     shape='both', durOfTrial=1, sampleFreq=100, regionGrowing=True):
     ''' Returns a vector containing the dipole currents. Requires only a dipole 
     position list and the simulation settings.
@@ -90,7 +84,7 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
         list of two numbers specifying a range.
     regionGrowing : bool, whether to use region growing. If True, please supply
         also the neighbors to the settings.
-    neighbors : list, a list containing all the (triangle-) neighbors for each 
+    neighbors : >>>not supported at the moment<<< list, a list containing all the (triangle-) neighbors for each 
         dipole. Can be calculated using "get_triangle_neighbors"
     extents : int/float/tuple/list, size of sources. If regionGrowing==True this 
         specifies the neighborhood order (see Grova et al., 2006), otherwise the diameter in mm. Can be a single number or a 
@@ -178,24 +172,26 @@ def simulate_source(pos, neighbors, n_sources=(1, 5), extents=(2, 3), amplitudes
     # Loop through source centers (i.e. seeds of source positions)
     for i, (src_center, shape) in enumerate(zip(src_centers, shapes)):
         # Smoothing and amplitude assignment
-        if regionGrowing:
-            d = get_n_order_indices(extents[i], src_center, neighbors)
-            dists = np.empty((pos.shape[0]))
-            dists[:] = np.inf
-            dists[d] = np.sqrt(np.sum((pos - pos[src_center, :])**2, axis=1))[d]
-        else:
-            dists = np.sqrt(np.sum((pos - pos[src_center, :])**2, axis=1))
-            d = np.where(dists<extents[i]/2)[0]
+        # if regionGrowing:
+        #     d = get_n_order_indices(extents[i], src_center, neighbors)
+        #     dists = np.empty((pos.shape[0]))
+        #     dists[:] = np.inf
+            # dists[d] = np.sqrt(np.sum((pos - pos[src_center, :])**2, axis=1))[d]
+        # else:
+        dists = np.sqrt(np.sum((pos - pos[src_center, :])**2, axis=1))
+        d = np.where(dists<extents[i]/2)[0]
 
 
         if shape == 'gaussian':
             # sd = extents[i]/2  # <-This does not work when extents can also be neighborhood orders
-            sd = np.max(dists[d]) / 2  # <- works better
+            sd = np.clip(np.max(dists[d]) / 2, a_min=0.1, a_max=np.inf)  # <- works better
+            
             source[:] += gaussian(dists, 0, sd) * amplitudes[i]
         elif shape == 'flat':
             source[d] += amplitudes[i]
         else:
-            raise(BaseException, "shape must be of type >string< and be either >gaussian< or >flat<.")
+            msg = BaseException("shape must be of type >string< and be either >gaussian< or >flat<.")
+            raise(msg)
         sourceMask[d] = 1
 
     # if durOfTrial > 0:
@@ -314,13 +310,13 @@ def create_eeg_helper(eeg_sample, n_trials, snr, beta):
     return noise_trial
 
 
-def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
+def create_eeg(sourceEstimates, fwd, info, snr=2, n_trials=20, beta=1, n_jobs=-1,
     return_raw_data=False, return_single_epoch=True):
     ''' Create EEG of specified number of trials based on sources and some SNR.
     Parameters:
     -----------
     sourceEstimates : list, list containing mne.SourceEstimate objects
-    pth_fwd : str, path to the forward model files
+    fwd : mne.Forward, the mne.Forward object 
     snr : tuple/list/float, desired signal to noise ratio within individual 
         trials. Can be a list or tuple of two floats specifying a range.
     n_trials : int, number of simulated trials
@@ -358,8 +354,8 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
         raise ValueError(msg)
 
     # Load some forward model objects
-    leadfield = util.load_leadfield(pth_fwd)
-    info = util.load_info(pth_fwd)
+    fwd_fixed, leadfield = util.unpack_fwd(fwd)[:2]
+
     info['sfreq'] = sfreq
     
     n_samples = len(sources)
@@ -391,12 +387,12 @@ def create_eeg(sourceEstimates, pth_fwd, snr=2, n_trials=20, beta=1, n_jobs=-1,
             print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
             print(f'eeg_trials_noisy.shape={eeg_trials_noisy.shape}')
             ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
-            epochs = util.eeg_to_Epochs(ERP_samples_noisy, pth_fwd, info=info)
+            epochs = util.eeg_to_Epochs(ERP_samples_noisy, fwd_fixed, info=info)
 
         else:
             print(f'\nConvert EEG matrices to instances of mne.Epochs...')
             epochs = Parallel(n_jobs=n_jobs, backend='loky')(
-                delayed(util.eeg_to_Epochs)(sample, pth_fwd, info=info) 
+                delayed(util.eeg_to_Epochs)(sample, fwd_fixed, info=info) 
                 for sample in tqdm(eeg_trials_noisy))
     else:
         epochs = eeg_trials_noisy
