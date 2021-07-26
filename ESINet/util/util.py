@@ -2,8 +2,6 @@ import pickle as pkl
 import mne
 import numpy as np
 import os
-from .. import simulations
-# from ..simulations import get_triangle_neighbors
 
 EPOCH_INSTANCES = (mne.epochs.EpochsArray, mne.Epochs, mne.EpochsArray, mne.epochs.EpochsFIF)
 EVOKED_INSTANCES = (mne.Evoked, mne.EvokedArray)
@@ -182,3 +180,50 @@ def repeat_newcol(x, n):
     for i in range(n):
         out[:,  i] = x
     return np.squeeze(out)
+
+
+def get_n_order_indices(order, pick_idx, neighbors):
+    ''' Iteratively performs region growing by selecting neighbors of 
+    neighbors for <order> iterations.
+    '''
+    current_indices = np.array([pick_idx])
+
+    if order == 0:
+        return current_indices
+
+    for _ in range(order):
+        current_indices = np.append(current_indices, np.concatenate(neighbors[current_indices]))
+
+    return np.unique(np.array(current_indices))
+
+def gaussian(x, mu, sig):
+    return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
+
+def get_triangle_neighbors(tris_lr):
+    if not np.all(np.unique(tris_lr[0]) == np.arange(len(np.unique(tris_lr[0])))):
+        for hem in range(2):
+            old_indices = np.sort(np.unique(tris_lr[hem]))
+            new_indices = np.arange(len(old_indices))
+            for old_idx, new_idx in zip(old_indices, new_indices):
+                tris_lr[hem][tris_lr[hem] == old_idx] = new_idx
+
+        print('indices were weird - fixed them.')
+    numberOfDipoles = len(np.unique(tris_lr[0])) + len(np.unique(tris_lr[1]))
+    neighbors = [list() for _ in range(numberOfDipoles)]
+    # correct right-hemisphere triangles
+    tris_lr_adjusted = deepcopy(tris_lr)
+    # the right hemisphere indices start at zero, we need to offset them to start where left hemisphere indices end.
+    tris_lr_adjusted[1] += int(numberOfDipoles/2)
+    # left and right hemisphere
+    for hem in range(2):
+        for idx in range(numberOfDipoles):
+            # Find the indices of the triangles where our current dipole idx is part of
+            trianglesOfIndex = tris_lr_adjusted[hem][np.where(tris_lr_adjusted[hem] == idx)[0], :]
+            for tri in trianglesOfIndex:
+                neighbors[idx].extend(tri)
+                # Remove self-index (otherwise neighbors[idx] is its own neighbor)
+                neighbors[idx] = list(filter(lambda a: a != idx, neighbors[idx]))
+            # Remove duplicates
+            neighbors[idx] = list(np.unique(neighbors[idx]))
+            # print(f'idx {idx} found in triangles: {neighbors[idx]}') 
+    return neighbors

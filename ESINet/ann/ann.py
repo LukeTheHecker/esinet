@@ -209,7 +209,7 @@ def solve_p(y_est, x_true, leadfield):
     y_scaled = y_est * scaler * base_scaler
     return y_scaled
 
-def mse_opt(scaler, leadfield, y_est, x_true):
+def mse_opt(leadfield, y_est, x_true):
     x_est = np.matmul(leadfield, y_est) 
     error = np.abs(pearsonr(x_true-x_est, x_true)[0])
     

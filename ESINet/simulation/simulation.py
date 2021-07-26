@@ -125,149 +125,6 @@ class Simulation:
 
         return sources
     
-    def simulate_eeg(self):
-        ''' Create EEG of specified number of trials based on sources and some SNR.
-        Parameters
-        -----------
-        sourceEstimates : list 
-                        list containing mne.SourceEstimate objects
-        fwd : mne.Forward
-            the mne.Forward object
-        target_snr : tuple/list/float, 
-                    desired signal to noise ratio. Can be a list or tuple of two 
-                    floats specifying a range.
-        beta : float
-            determines the frequency spectrum of the noise added to the signal: 
-            power = 1/f^beta. 
-            0 will yield white noise, 1 will yield pink noise (1/f spectrum)
-        n_jobs : int
-                Number of jobs to run in parallel. -1 will utilize all cores.
-        return_raw_data : bool
-                        if True the function returns a list of mne.SourceEstimate 
-                        objects, otherwise it returns raw data
-
-        Return
-        -------
-        epochs : list
-                list of either mne.Epochs objects or list of raw EEG data 
-                (see argument <return_raw_data> to change output)
-        '''
-        n_simulation_trials = 20
-        # Unpack the source data from the SourceEstimate objects
-        # if type(self.source_data) == mne.source_estimate.SourceEstimate:
-        #     sources = np.transpose(self.source_data.data)
-        #     sfreq = self.settings['sample_frequency']
-        #     n_timepoints = 1
-        # elif type(self.source_data) == list:
-        #     sources = np.stack([se.data for se in self.source_data], axis=0)
-        #     sfreq = self.source_data[0].simulationInfo['sampleFreq']
-        #     n_timepoints = sources.shape[-1]
-        # elif type(self.source_data) == np.ndarray:
-        #     sources = np.squeeze(self.source_data)
-        #     if len(sources.shape) == 2:
-        #         sources = np.expand_dims(sources, axis=-1)
-        #     sfreq = 1
-        #     print(f'sources.shape={sources.shape}')
-        #     n_timepoints = sources.shape[-1]
-        # else:
-        #     msg = f'self.source_data must be of type <list> or <mne.source_estimate.SourceEstimate> but is of type <{type(self.source_data)}>'
-        #     raise ValueError(msg)
-        
-        # unpack numpy array of source data
-        if isinstance(self.source_data, (list, tuple)):
-            sources = np.stack([source.data.T for source in self.source_data], axis=0)
-        else:
-            sources = self.source_data.data.T
-
-        # if there is no temporal dimension...
-        if len(sources.shape) < 3:
-            # ...add empty temporal dimension
-            sources = np.expand_dims(sources, axis=2)
-
-        # Load some forward model objects
-        fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
-        n_samples = sources.shape[0]
-        n_elec = leadfield.shape[0]
-
-        eeg_clean = np.stack([np.matmul(leadfield, y) for y in np.squeeze(sources)], axis=0)
-    
-        
-        # eeg_trials_noisy = np.zeros((n_samples, n_trials, n_elec, n_timepoints))
-
-        print(f'\nCreate EEG trials with noise...')
-        if self.parallel:
-            eeg_trials_noisy = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
-                (delayed(self.create_eeg_helper)(eeg_clean[sample], n_simulation_trials,
-                self.settings['target_snr'], self.settings['beta']) for sample in tqdm(range(n_samples))), axis=0)
-        else:
-            eeg_trials_noisy = np.stack(
-                [self.create_eeg_helper(eeg_clean[sample], n_simulation_trials, 
-                self.settings['target_snr'], self.settings['beta']) 
-                for sample in tqdm(range(n_samples))], 
-                axis=0)
-            
-        if n_simulation_trials == 1 and len(eeg_trials_noisy.shape) == 2:
-            # Add empty dimension to contain the single trial
-            eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=1)
-
-        
-        if len(eeg_trials_noisy.shape) == 3:
-            eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=-1)
-            
-        if eeg_trials_noisy.shape[2] != n_elec:
-            eeg_trials_noisy = np.swapaxes(eeg_trials_noisy, 1, 2)
-
-        print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
-        ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
-        epochs = util.eeg_to_Epochs(ERP_samples_noisy, fwd_fixed, info=self.info)
-
-        return epochs
-    
-
-    def create_eeg_helper(self, eeg_sample, n_simulation_trials, target_snr, beta):
-        if type(target_snr) == tuple or type(target_snr) == list:
-            target_snr = random.uniform(*target_snr)
-        
-        # If only channel dimension add empty time dimension:
-        if len(eeg_sample.shape) == 1:
-            eeg_sample = np.expand_dims(eeg_sample, axis=1)
-
-        eeg_sample = np.repeat(np.expand_dims(eeg_sample, 0), n_simulation_trials, axis=0)
-        snr = target_snr / np.sqrt(n_simulation_trials)
-        noise_trial = self.add_noise(eeg_sample, snr, beta=beta)
-        
-        return noise_trial
-    
-    def add_noise(self, x, snr, beta=0):
-        """ Add noise of given SNR to signal x.
-        Parameters:
-        -----------
-        x : numpy.ndarray, 3-dimensional numpy array of dims (trials, channels, timepoints)
-        Return:
-        -------
-        """
-    
-        # This looks inconvenient but we need to make sure that there is no empty dimension for the powerlaw noise function.
-        x_shape = (x.shape[0], x.shape[1], np.clip(x.shape[2], a_min=2, a_max=np.inf).astype(int))
-        noise = cn.powerlaw_psd_gaussian(beta, x_shape)
-        
-        # In case we added another entry in the 2nd dimension we have to remove it here again.
-        if x_shape[2] != x.shape[2]:
-            noise=noise[:, :, :1]
-    
-
-        noise_gfp = np.std(noise, axis=1)
-        rms_noise = np.mean(noise_gfp)  # rms(noise)
-
-        x_gfp = np.std(x, axis=1)
-        rms_x = np.mean(np.max(np.abs(x_gfp), axis=1))  # x.max()
-        
-        # rms_noise = rms(noise-np.mean(noise))
-        noise_scaler = rms_x / (rms_noise*snr)
-        
-        return x + noise*noise_scaler
-
-
     def simulate_source(self):
         ''' Returns a vector containing the dipole currents. Requires only a dipole 
         position list and the simulation settings.
@@ -385,6 +242,132 @@ class Simulation:
             source = np.expand_dims(source, axis=1)
         
         return source
+
+    def simulate_eeg(self):
+        ''' Create EEG of specified number of trials based on sources and some SNR.
+        Parameters
+        -----------
+        sourceEstimates : list 
+                        list containing mne.SourceEstimate objects
+        fwd : mne.Forward
+            the mne.Forward object
+        target_snr : tuple/list/float, 
+                    desired signal to noise ratio. Can be a list or tuple of two 
+                    floats specifying a range.
+        beta : float
+            determines the frequency spectrum of the noise added to the signal: 
+            power = 1/f^beta. 
+            0 will yield white noise, 1 will yield pink noise (1/f spectrum)
+        n_jobs : int
+                Number of jobs to run in parallel. -1 will utilize all cores.
+        return_raw_data : bool
+                        if True the function returns a list of mne.SourceEstimate 
+                        objects, otherwise it returns raw data
+
+        Return
+        -------
+        epochs : list
+                list of either mne.Epochs objects or list of raw EEG data 
+                (see argument <return_raw_data> to change output)
+        '''
+        n_simulation_trials = 20
+        
+        # unpack numpy array of source data
+        if isinstance(self.source_data, (list, tuple)):
+            sources = np.stack([source.data.T for source in self.source_data], axis=0)
+        else:
+            sources = self.source_data.data.T
+
+        # if there is no temporal dimension...
+        if len(sources.shape) < 3:
+            # ...add empty temporal dimension
+            sources = np.expand_dims(sources, axis=2)
+
+        # Load some forward model objects
+        fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
+        n_samples = sources.shape[0]
+        n_elec = leadfield.shape[0]
+
+        eeg_clean = np.stack([np.matmul(leadfield, y) for y in np.squeeze(sources)], axis=0)
+    
+        
+        # eeg_trials_noisy = np.zeros((n_samples, n_trials, n_elec, n_timepoints))
+
+        print(f'\nCreate EEG trials with noise...')
+        if self.parallel:
+            eeg_trials_noisy = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                (delayed(self.create_eeg_helper)(eeg_clean[sample], n_simulation_trials,
+                self.settings['target_snr'], self.settings['beta']) for sample in tqdm(range(n_samples))), axis=0)
+        else:
+            eeg_trials_noisy = np.stack(
+                [self.create_eeg_helper(eeg_clean[sample], n_simulation_trials, 
+                self.settings['target_snr'], self.settings['beta']) 
+                for sample in tqdm(range(n_samples))], 
+                axis=0)
+            
+        if n_simulation_trials == 1 and len(eeg_trials_noisy.shape) == 2:
+            # Add empty dimension to contain the single trial
+            eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=1)
+
+        
+        if len(eeg_trials_noisy.shape) == 3:
+            eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=-1)
+            
+        if eeg_trials_noisy.shape[2] != n_elec:
+            eeg_trials_noisy = np.swapaxes(eeg_trials_noisy, 1, 2)
+
+        print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
+        ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
+        epochs = util.eeg_to_Epochs(ERP_samples_noisy, fwd_fixed, info=self.info)
+
+        return epochs
+    
+
+    def create_eeg_helper(self, eeg_sample, n_simulation_trials, target_snr, beta):
+        if type(target_snr) == tuple or type(target_snr) == list:
+            target_snr = random.uniform(*target_snr)
+        
+        # If only channel dimension add empty time dimension:
+        if len(eeg_sample.shape) == 1:
+            eeg_sample = np.expand_dims(eeg_sample, axis=1)
+
+        eeg_sample = np.repeat(np.expand_dims(eeg_sample, 0), n_simulation_trials, axis=0)
+        snr = target_snr / np.sqrt(n_simulation_trials)
+        noise_trial = self.add_noise(eeg_sample, snr, beta=beta)
+        
+        return noise_trial
+    
+    def add_noise(self, x, snr, beta=0):
+        """ Add noise of given SNR to signal x.
+        Parameters:
+        -----------
+        x : numpy.ndarray, 3-dimensional numpy array of dims (trials, channels, timepoints)
+        Return:
+        -------
+        """
+    
+        # This looks inconvenient but we need to make sure that there is no empty dimension for the powerlaw noise function.
+        x_shape = (x.shape[0], x.shape[1], np.clip(x.shape[2], a_min=2, a_max=np.inf).astype(int))
+        noise = cn.powerlaw_psd_gaussian(beta, x_shape)
+        
+        # In case we added another entry in the 2nd dimension we have to remove it here again.
+        if x_shape[2] != x.shape[2]:
+            noise=noise[:, :, :1]
+    
+
+        noise_gfp = np.std(noise, axis=1)
+        rms_noise = np.mean(noise_gfp)  # rms(noise)
+
+        x_gfp = np.std(x, axis=1)
+        rms_x = np.mean(np.max(np.abs(x_gfp), axis=1))  # x.max()
+        
+        # rms_noise = rms(noise-np.mean(noise))
+        noise_scaler = rms_x / (rms_noise*snr)
+        
+        return x + noise*noise_scaler
+
+
+    
 
     def check_settings(self):
         ''' Check if settings are complete and insert missing 
