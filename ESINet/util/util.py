@@ -5,10 +5,17 @@ import os
 from .. import simulations
 # from ..simulations import get_triangle_neighbors
 
+EPOCH_INSTANCES = (mne.epochs.EpochsArray, mne.Epochs, mne.EpochsArray, mne.epochs.EpochsFIF)
+EVOKED_INSTANCES = (mne.Evoked, mne.EvokedArray)
+RAW_INSTANCES = (mne.io.Raw, mne.io.RawArray)
+
 def load_info(pth_fwd):
     with open(pth_fwd + '/info.pkl', 'rb') as file:  
         info = pkl.load(file)
     return info
+    
+def gaussian(x, mu, sig):
+    return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
 
 def load_leadfield(pth_fwd):
     ''' Load the leadfield matrix from the path of the forward model.'''
@@ -133,3 +140,45 @@ def unpack_fwd(fwd):
     # neighbors = get_neighbors(fwd)
 
     return fwd_fixed, leadfield, pos, tris#, neighbors
+
+def calc_snr_range(mne_obj, baseline_span=(-0.2, 0.0), data_span=(0.0, 0.5)):
+    """ Calculate the signal to noise ratio (SNR) range of your mne object.
+    
+    Parameters:
+    -----------
+    mne_obj : mne.Epochs or mne.Evoked object. The mne object that contains your m/eeg data.
+    baseline_span : tuple, list. The range in seconds that defines the baseline interval.
+    data_span : tuple, list. The range in seconds that defines the data (signal) interval.
+    
+    Return:
+    -------
+    snr_range : list, range of SNR values in your data.
+
+    """
+
+    if isinstance(mne_obj, EPOCH_INSTANCES):
+        evoked = mne_obj.average()
+    elif isinstance(mne_obj, EVOKED_INSTANCES):
+        evoked = mne_obj
+    else:
+        msg = f'mne_obj is of type {type(mne_obj)} but should be mne.Evoked(Array) or mne.Epochs(Array).'
+        raise ValueError(msg)
+    
+    
+    data = np.squeeze(evoked.data)
+    baseline_range = range(*[np.argmin(np.abs(evoked.times-base)) for base in baseline_span])
+    data_range = range(*[np.argmin(np.abs(evoked.times-base)) for base in data_span])
+    
+    gfp = np.std(data, axis=0)
+    snr_lo = gfp[data_range].min() / gfp[baseline_range].max() 
+    snr_hi = gfp[data_range].max() / gfp[baseline_range].min()
+    # snr_mean = gfp[data_range].mean() / gfp[baseline_range].mean()
+    snr_range = [snr_lo, snr_hi]
+    return snr_range
+
+def repeat_newcol(x, n):
+    ''' Repeat a list/numpy.ndarray x in n columns.'''
+    out = np.zeros((len(x), n))
+    for i in range(n):
+        out[:,  i] = x
+    return np.squeeze(out)

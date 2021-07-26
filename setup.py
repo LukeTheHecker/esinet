@@ -8,7 +8,7 @@ setuptools.setup(
     version="0.0.13",
     author="Lukas Hecker",
     author_email="lukas_hecker@web.de",
-    description="Solve the M/EEG inverse problem using artificial neural networks with Python 3 and the MNE library.",
+    description="Solves the M/EEG inverse problem using artificial neural networks with Python 3 and the MNE library.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/LukeTheHecker/esinet",

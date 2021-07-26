@@ -1,10 +1,10 @@
-# ESINet: Electric source imaging using artificial neural networks (ANNs)
+# esinet: Electric source imaging using artificial neural networks (ANNs)
 
-ESINet let's you solve the EEG inverse problem using ANNs. 
+esinet let's you solve the EEG inverse problem using ANNs. 
 
 It is based on our publication: [ConvDip: A Convolutional Neural Network for Better EEG Source Imaging](https://www.frontiersin.org/articles/10.3389/fnins.2021.569918/full)
 
-![ESINet](/assets/ESINet.png)
+![esinet](/assets/esinet.png)
 Neural network design was created [here](http://alexlenail.me/NN-SVG/index.html)
 
 <br/><br/>
@@ -24,11 +24,11 @@ Neural network design was created [here](http://alexlenail.me/NN-SVG/index.html)
 <br/>
 
 # Installation from PyPi
-Use [pip](https://pip.pypa.io/en/stable/) to install ESINet and all its
+Use [pip](https://pip.pypa.io/en/stable/) to install esinet and all its
 dependencies from [PyPi](https://pypi.org/):
 
 ```
-pip install ESINet
+pip install esinet
 ```
 
 <br/>
@@ -39,7 +39,7 @@ Check out one of the [tutorials](tutorials/) to learn how to use the package:
 
 * [Base tutorial](tutorials/tutorial.ipynb): Simulate data and train a ANN to predict some sources. Shows the most important functions of this package and serves as the easiest entry point.
   
-* [Brainstorm Auditory example](tutorials/brainstorm_auditory_example.ipynb): This tutorial shows you how to use ESINet to predict the sources in word processing data. Code was partially used from the [MNE tutorials](https://mne.tools/stable/auto_tutorials/sample-datasets/plot_brainstorm_auditory.html?highlight=brainstorm)
+* [Brainstorm Auditory example](tutorials/brainstorm_auditory_example.ipynb): This tutorial shows you how to use esinet to predict the sources in word processing data. Code was partially used from the [MNE tutorials](https://mne.tools/stable/auto_tutorials/sample-datasets/plot_brainstorm_auditory.html?highlight=brainstorm)
  
 <br/>
 
