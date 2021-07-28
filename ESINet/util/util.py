@@ -1,7 +1,10 @@
+from esinet.net.net import Net
 import pickle as pkl
 import mne
 import numpy as np
 import os
+from ..simulation import Simulation
+from ..net import Net
 
 EPOCH_INSTANCES = (mne.epochs.EpochsArray, mne.Epochs, mne.EpochsArray, mne.epochs.EpochsFIF)
 EVOKED_INSTANCES = (mne.Evoked, mne.EvokedArray)
@@ -87,9 +90,9 @@ def eeg_to_Epochs(data, pth_fwd, info=None):
     if info is None:
         info = load_info(pth_fwd)
     # If only one time point...
-    if data.shape[-1] == 1:
-        # ...set sampling frequency to 1
-        info['sfreq'] = 1
+    # if data.shape[-1] == 1:
+    #     # ...set sampling frequency to 1
+    #     info['sfreq'] = 1
     # print(f'data.shape={data.shape}')
     epochs = mne.EpochsArray(data, info, verbose=0)
     try:
@@ -227,3 +230,75 @@ def get_triangle_neighbors(tris_lr):
             neighbors[idx] = list(np.unique(neighbors[idx]))
             # print(f'idx {idx} found in triangles: {neighbors[idx]}') 
     return neighbors
+
+
+def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), data_span=(0, 0.5),
+    n_samples=int(1e4), optimizer=None, learning_rate=0.001, 
+        validation_split=0.1, n_epochs=100, metrics=None, device=None, delta=1, 
+        batch_size=128, loss=None, parallel=False, verbose=1):
+    ''' The all-in-one convenience function for esinet.
+    
+    Parameters
+    ----------
+    data_obj : mne.Epochs, mne.Evoked
+        The mne object holding the M/EEG data. Can be Epochs or 
+        averaged (Evoked) responses.
+    fwd : mne.Forward
+        The forward model
+    baseline_span : tuple
+        The time range of the baseline in seconds.
+    data_span : tuple
+        The time range of the data in seconds.
+    n_samples : int
+        The number of training samples to simulate. The 
+        higher, the more accurate the inverse solution
+    optimizer : tf.keras.optimizers
+        The optimizer that for backpropagation.
+    learning_rate : float
+        The learning rate for training the neural network
+    validation_split : float
+        Proportion of data to keep as validation set.
+    n_epochs : int
+        Number of epochs to train. In one epoch all training samples 
+        are used once for training.
+    metrics : list/str
+        The metrics to be used for performance monitoring during training.
+    device : str
+        The device to use, e.g. a graphics card.
+    delta : float
+        Controls the Huber loss.
+    batch_size : int
+        The number of samples to simultaneously calculate the error 
+        during backpropagation.
+    loss : tf.kers.losses
+        The loss function.
+    verbose : int/bool
+        Controls verbosity of the program.
+    
+    
+    Return
+    ------
+    source_estimate : mne.SourceEstimate
+        The source
+
+    Example
+    -------
+
+    source_estimate = calculate_source(epochs, fwd)
+    source_estimate.plot()
+
+    '''
+    # Calculate signal to noise ratio of the data
+    target_snr = calc_snr_range(data_obj, baseline_span=baseline_span, data_span=data_span)
+    # Simulate sample M/EEG data
+    simulation = Simulation(fwd, data_obj.info, settings=dict(duration_of_trial=0, target_snr=target_snr), parallel=parallel, verbose=True)
+    simulation.simulate(n_samples=n_samples)
+    # Train neural network
+    net = Net(fwd, verbose=verbose)
+    net.fit(simulation, optimizer=optimizer, learning_rate=learning_rate, 
+        validation_split=validation_split, epochs=n_epochs, metrics=metrics,
+        device=device, delta=delta, batch_size=batch_size, loss=loss)
+    # Predict sources
+    source_estimate = net.predict(data_obj)
+
+    return source_estimate

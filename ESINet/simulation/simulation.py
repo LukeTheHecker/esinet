@@ -13,8 +13,8 @@ from .. import util
 
 DEFAULT_SETTINGS = {
             'number_of_sources': (1, 5),
-            'extents': (2, 40),
-            'amplitudes': (1, 100),
+            'extents': (25, 35),
+            'amplitudes': (1, 10),
             'shapes': 'both',
             'duration_of_trial': 0,
             'sample_frequency': 100,
@@ -44,7 +44,7 @@ class Simulation:
             'gaussian' or 'flat' (i.e. uniform) or 'both'.
         durOfTrial : int/float
             specifies the duration of a trial.
-        sampleFreq : int
+        sample_frequency : int
             specifies the sample frequency of the data.
     fwd : mne.Forward
         The mne-python Forward object that contains the 
@@ -65,13 +65,15 @@ class Simulation:
     '''
     def __init__(self, fwd, info, settings=DEFAULT_SETTINGS, n_jobs=-1, 
         parallel=False, verbose=False):
+        settings['sample_frequency'] = info['sfreq']
         self.settings = settings
         self.check_settings()
 
         self.source_data = None
         self.eeg_data = None
-        self.fwd = fwd
-        self.check_info(info)
+        self.fwd = deepcopy(fwd)
+        self.fwd.pick_channels(info['ch_names'])
+        self.check_info(deepcopy(info))
         self.info['sfreq'] = self.settings['sample_frequency']
 
         self.n_jobs = n_jobs
@@ -84,27 +86,27 @@ class Simulation:
         self.info = info.pick_channels(self.fwd.ch_names, ordered=True)
 
 
-    def simulate(self, number_of_simulations=10000):
+    def simulate(self, n_samples=10000):
         ''' Simulate sources and EEG data'''
      
-        self.source_data = self.simulate_sources(number_of_simulations)
+        self.source_data = self.simulate_sources(n_samples)
         self.eeg_data = self.simulate_eeg()
 
-        pass
+        return self
 
     def plot(self):
         pass
     
-    def simulate_sources(self, number_of_simulations):
+    def simulate_sources(self, n_samples):
         if self.parallel:
             if self.verbose:
                 print(f'Simulate Source')
             source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')(
                 delayed(self.simulate_source)() 
-                for i in tqdm(range(number_of_simulations))))
+                for i in tqdm(range(n_samples))))
         else:
             source_data = np.stack([self.simulate_source() 
-                for _ in tqdm(range(number_of_simulations))], axis=0)
+                for _ in tqdm(range(n_samples))], axis=0)
         
         # Convert to mne.SourceEstimate
         if self.settings['duration_of_trial'] == 0:
@@ -271,10 +273,11 @@ class Simulation:
                 (see argument <return_raw_data> to change output)
         '''
         n_simulation_trials = 20
-        
+         
+        # Desired Dim of sources: (samples x dipoles x time points)
         # unpack numpy array of source data
         if isinstance(self.source_data, (list, tuple)):
-            sources = np.stack([source.data.T for source in self.source_data], axis=0)
+            sources = np.stack([source.data for source in self.source_data], axis=0)
         else:
             sources = self.source_data.data.T
 
@@ -285,13 +288,16 @@ class Simulation:
 
         # Load some forward model objects
         fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
-        n_samples = sources.shape[0]
+        n_samples, n_dipoles, n_timepoints = sources.shape
         n_elec = leadfield.shape[0]
 
-        eeg_clean = np.stack([np.matmul(leadfield, y) for y in np.squeeze(sources)], axis=0)
-    
-        
-        # eeg_trials_noisy = np.zeros((n_samples, n_trials, n_elec, n_timepoints))
+        # Desired Dim for eeg_clean: (samples, electrodes, time points)
+        eeg_clean = np.zeros((n_samples, n_elec, n_timepoints))
+        for i, sample in enumerate(sources):
+            for j, time_point in enumerate(sample.T):
+                eeg_clean[i, :, j] = np.matmul(leadfield, time_point)
+
+        # eeg_trials_noisy = np.zeros((n_samples, n_simulation_trials, n_elec, n_timepoints))
 
         print(f'\nCreate EEG trials with noise...')
         if self.parallel:
@@ -324,17 +330,33 @@ class Simulation:
     
 
     def create_eeg_helper(self, eeg_sample, n_simulation_trials, target_snr, beta):
-        if type(target_snr) == tuple or type(target_snr) == list:
-            target_snr = random.uniform(*target_snr)
-        
-        # If only channel dimension add empty time dimension:
-        if len(eeg_sample.shape) == 1:
-            eeg_sample = np.expand_dims(eeg_sample, axis=1)
+        ''' Helper function for EEG simulation that transforms a clean 
+            M/EEG signal to a bunch of noisy trials.
 
+        Parameters
+        ----------
+        eeg_sample : numpy.ndarray
+            data sample with dimension (time_points, electrodes)
+        n_simulation_trials : int
+            The number of trials desired
+        target_snr : float/list/tuple
+            The target signal-to-noise ratio, is converted to 
+            single-trial SNR based on number of trials
+        beta : float/list/tuple
+            The beta exponent of the 1/f**beta noise
+
+        '''
+        if isinstance(target_snr, (tuple, list)):
+            target_snr = random.uniform(*target_snr)
+        if isinstance(beta, (tuple, list)):
+            beta = random.uniform(*beta)
+        
+        assert len(eeg_sample.shape) == 2, 'Length of eeg_sample must be 2 (time_points, electrodes)'
+        
         eeg_sample = np.repeat(np.expand_dims(eeg_sample, 0), n_simulation_trials, axis=0)
         snr = target_snr / np.sqrt(n_simulation_trials)
         noise_trial = self.add_noise(eeg_sample, snr, beta=beta)
-        
+
         return noise_trial
     
     def add_noise(self, x, snr, beta=0):
@@ -354,23 +376,24 @@ class Simulation:
         if x_shape[2] != x.shape[2]:
             noise=noise[:, :, :1]
     
-
         noise_gfp = np.std(noise, axis=1)
         rms_noise = np.mean(noise_gfp)  # rms(noise)
-
+        
         x_gfp = np.std(x, axis=1)
         rms_x = np.mean(np.max(np.abs(x_gfp), axis=1))  # x.max()
         
         # rms_noise = rms(noise-np.mean(noise))
         noise_scaler = rms_x / (rms_noise*snr)
-        
-        return x + noise*noise_scaler
+        out = x + noise*noise_scaler  
+
+        return out
 
 
     
 
     def check_settings(self):
         ''' Check if settings are complete and insert missing 
+        
             entries if there are any.
         '''
 
