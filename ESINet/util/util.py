@@ -140,7 +140,8 @@ def unpack_fwd(fwd):
     pos = np.concatenate([pos_left, pos_right], axis=0)
     # neighbors = get_neighbors(fwd)
 
-    return fwd_fixed, leadfield, pos, tris#, neighbors
+    return fwd_fixed, leadfield, pos, tris#
+
 
 def calc_snr_range(mne_obj, baseline_span=(-0.2, 0.0), data_span=(0.0, 0.5)):
     """ Calculate the signal to noise ratio (SNR) range of your mne object.
@@ -302,3 +303,25 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), data_span=(0, 0.5
     source_estimate = net.predict(data_obj)
 
     return source_estimate
+
+def get_eeg_from_source(stc, fwd, info, tmin=-0.2):
+    ''' Get EEG from source by projecting source activity through the lead field.
+    
+    Parameters
+    ----------
+    stc : mne.SourceEstimate
+        The source estimate object holding source data.
+    fwd : mne.Forawrd
+        The forward model.
+    
+    Return
+    ------
+    evoked : mne.EvokedArray
+        The EEG data oject.
+    '''
+    fwd = deepcopy(fwd)
+    fwd = fwd.copy().pick_channels(info['ch_names'])
+    leadfield = fwd['sol']['data']
+    eeg_hat = np.matmul(leadfield, stc.data)
+
+    return mne.EvokedArray(eeg_hat, info, tmin=tmin)
