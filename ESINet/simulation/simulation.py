@@ -113,7 +113,7 @@ class Simulation:
             if self.verbose:
                 print(f'Converting Source Data to mne.SourceEstimate object')
             sources = util.source_to_sourceEstimate(source_data, self.fwd, 
-                sfreq=self.settings['sample_frequency']) 
+                sfreq=self.settings['sample_frequency'], subject=self.subject) 
         else:
             if self.parallel:
                 sources = Parallel(n_jobs=self.n_jobs, backend='loky')(
@@ -122,7 +122,7 @@ class Simulation:
                     for source in tqdm(source_data))
             else:
                 sources = [util.source_to_sourceEstimate(source, 
-                    self.fwd, sfreq=self.settings['sample_frequency']) 
+                    self.fwd, sfreq=self.settings['sample_frequency'], subject=self.subject) 
                     for source in tqdm(source_data)]
 
         return sources
