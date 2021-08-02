@@ -75,7 +75,7 @@ class Simulation:
         self.fwd.pick_channels(info['ch_names'])
         self.check_info(deepcopy(info))
         self.info['sfreq'] = self.settings['sample_frequency']
-
+        self.subject = self.fwd['src'][0]['subject_his_id']
         self.n_jobs = n_jobs
         self.parallel = parallel
         self.verbose = verbose
@@ -118,7 +118,7 @@ class Simulation:
             if self.parallel:
                 sources = Parallel(n_jobs=self.n_jobs, backend='loky')(
                     delayed(util.source_to_sourceEstimate)
-                    (source, self.fwd, sfreq=self.settings['sample_frequency']) 
+                    (source, self.fwd, sfreq=self.settings['sample_frequency'], subject=self.subject) 
                     for source in tqdm(source_data))
             else:
                 sources = [util.source_to_sourceEstimate(source, 
