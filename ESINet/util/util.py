@@ -1,10 +1,9 @@
-from esinet.net.net import Net
 import pickle as pkl
 import mne
 import numpy as np
 import os
-from ..simulation import Simulation
-from ..net import Net
+from ..simulation.simulation import Simulation
+from ..net.net import Net
 
 EPOCH_INSTANCES = (mne.epochs.EpochsArray, mne.Epochs, mne.EpochsArray, mne.epochs.EpochsFIF)
 EVOKED_INSTANCES = (mne.Evoked, mne.EvokedArray)

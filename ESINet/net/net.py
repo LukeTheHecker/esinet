@@ -14,7 +14,8 @@ from copy import deepcopy
 import time
 from .. import util
 from ..simulation.simulation import Simulation
-
+from . import losses
+# import .losses
 class Net(keras.Sequential):
     ''' The neural network class that creates and trains the model. 
     Inherits the keras.Sequential class
@@ -48,7 +49,9 @@ class Net(keras.Sequential):
         self.n_layers = n_layers
         self.n_neurons = n_neurons
         self.activation_function = activation_function
-
+        # self.default_loss = tf.keras.losses.Huber(delta=delta)
+        self.default_loss = losses.weighted_huber_loss
+        
         self.verbose = verbose
 
         
@@ -100,8 +103,8 @@ class Net(keras.Sequential):
         return eeg, sources
 
     def fit(*args, optimizer=None, learning_rate=0.001, 
-        validation_split=0.1, epochs=100, metrics=None, device=None, delta=1, 
-        batch_size=128, loss=None, sample_weight=None):
+        validation_split=0.1, epochs=100, metrics=None, device=None, false_positive_penalty=2, 
+        delta=1., batch_size=128, loss=None, sample_weight=None):
         ''' Train the neural network using training data (eeg) and labels (sources).
         
         Parameters
@@ -124,6 +127,8 @@ class Net(keras.Sequential):
             The learning rate for training the neural network
         validation_split : float
             Proportion of data to keep as validation set.
+        delta : int/float
+            The delta parameter of the huber loss function
         epochs : int
             Number of epochs to train. In one epoch all training samples 
             are used once for training.
@@ -131,12 +136,13 @@ class Net(keras.Sequential):
             The metrics to be used for performance monitoring during training.
         device : str
             The device to use, e.g. a graphics card.
-        delta : float
-            Controls the Huber loss.
+        false_positive_penalty : int
+            Defines weighting of false-positive predictions. Increase for conservative 
+            inverse solutions, decrease for liberal prediction.
         batch_size : int
             The number of samples to simultaneously calculate the error 
             during backpropagation.
-        loss : tf.kers.losses
+        loss : tf.keras.losses
             The loss function.
         sample_weight : numpy.ndarray
             Optional numpy array of sample weights.
@@ -149,7 +155,7 @@ class Net(keras.Sequential):
         self = args[0]
 
         eeg, sources = self._handle_data_input(args)
-        
+        self.subject = sources.subject
         # Ensure that the forward model has the same 
         # channels as the eeg object
         self._check_model(eeg)
@@ -195,22 +201,23 @@ class Net(keras.Sequential):
         if optimizer is None:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         if loss is None:
-            loss = tf.keras.losses.Huber(delta=delta)
+            loss = self.default_loss(w=false_positive_penalty, delta=delta)
+
         elif type(loss) == list:
             loss = loss[0](*loss[1])
         if metrics is None:
-            metrics = tf.keras.losses.Huber(delta=delta)
+            metrics = [self.default_loss(w=false_positive_penalty, delta=delta), 'mean_squared_error']
 
         self.compile(optimizer, loss, metrics=metrics)
         if device is None:
-            try:
-                super(Net, self).fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
-                    validation_split=validation_split, verbose=self.verbose, callbacks=[es],
-                    sample_weight=sample_weight)
-            except:
-                super().fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
-                    validation_split=validation_split, verbose=self.verbose, callbacks=[es],
-                    sample_weight=sample_weight)
+            # try:
+            super(Net, self).fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
+                validation_split=validation_split, verbose=self.verbose, callbacks=[es],
+                sample_weight=sample_weight)
+            # except:
+            # super().fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
+            #     validation_split=validation_split, verbose=self.verbose, callbacks=[es],
+            #     sample_weight=sample_weight)
         else:
             with tf.device(device):
                 try:
@@ -252,9 +259,11 @@ class Net(keras.Sequential):
         ------
         outsource : either numpy.ndarray (if dtype='raw') or mne.SourceEstimate instance
         '''
+        
         self = args[0]
         
-        eeg, _ = self._handle_data_input(args)
+        eeg, sources = self._handle_data_input(args)
+        # self.subject = sources.subject
 
         if isinstance(eeg, mne.epochs.EvokedArray):
             sfreq = eeg.info['sfreq']
@@ -269,7 +278,7 @@ class Net(keras.Sequential):
             tmin = 0
             eeg = np.squeeze(np.array(eeg))
         else:
-            msg = f'eeg must be of type <numpy.ndarray> or <mne.epochs.EpochsArray>; got {type(EEG)} instead.'
+            msg = f'eeg must be of type <numpy.ndarray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
             raise ValueError(msg)
 
         if len(eeg.shape) == 1:
@@ -295,12 +304,12 @@ class Net(keras.Sequential):
             predicted_source_estimate = []
             for trial in range(EEG_prepd.shape[0]):
                 source_predicted_scaled.append( np.squeeze(np.stack([self.solve_p(source_frame, EEG_frame) for source_frame, EEG_frame in zip(source_predicted[trial], eeg[trial])], axis=0)) )
-                predicted_source_estimate.append( util.source_to_sourceEstimate(np.squeeze(source_predicted_scaled[trial]), self.fwd, sfreq=sfreq, tmin=tmin) )
+                predicted_source_estimate.append( util.source_to_sourceEstimate(np.squeeze(source_predicted_scaled[trial]), self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject) )
         else:
             source_predicted = super(Net, self).predict(np.squeeze(EEG_prepd))
             # Scale ConvDips prediction
             source_predicted_scaled = np.squeeze(np.stack([self.solve_p(source_frame, EEG_frame) for source_frame, EEG_frame in zip(source_predicted, eeg)], axis=0))   
-            predicted_source_estimate = util.source_to_sourceEstimate(np.squeeze(source_predicted_scaled), self.fwd, sfreq=sfreq, tmin=tmin)
+            predicted_source_estimate = util.source_to_sourceEstimate(np.squeeze(source_predicted_scaled), self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)
 
         return predicted_source_estimate
 
@@ -334,7 +343,7 @@ class Net(keras.Sequential):
 
         self = args[0]
         eeg, sources = self._handle_data_input(args)
-
+        
         y_hat = self.predict(eeg).data
         y = sources.data
         mean_squared_errors = np.mean((y_hat - y)**2, axis=0)
@@ -535,6 +544,7 @@ class BoostNet:
 
         self = args[0]
         eeg, sources = self._handle_data_input(args)
+        self.subject = sources.subject
 
         if self.verbose:
             print("Fit neural networks")

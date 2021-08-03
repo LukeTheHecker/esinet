@@ -8,7 +8,7 @@ from scipy.sparse import data
 from tqdm.notebook import tqdm
 import colorednoise as cn
 
-from .. import util
+from ..util import util
 
 
 DEFAULT_SETTINGS = {
