@@ -19,7 +19,7 @@ DEFAULT_SETTINGS = {
             'duration_of_trial': 0,
             'sample_frequency': 100,
             'target_snr': 4,
-            'beta': 1.0,
+            'beta': (0, 1.5),
         }
 
 class Simulation:
@@ -159,41 +159,16 @@ class Simulation:
         Grova, C., Daunizeau, J., Lina, J. M., Bénar, C. G., Benali, H., & Gotman, J. (2006). Evaluation of EEG localization methods using realistic simulations of interictal spikes. Neuroimage, 29(3), 734-753.
         '''
         
-        # Handle input
-
-        # Amplitudes come in nAm
-        if isinstance(self.settings['amplitudes'], (list, tuple)):
-            amplitudes = [amp* 1e-9  for amp in self.settings['amplitudes']] 
-        else:
-            amplitudes = self.settings['amplitudes'] * 1e-9
-
-        if self.settings['duration_of_trial'] > 0:
-            if self.settings['duration_of_trial'] < 0.5 :
-                print(f'duration_of_trials should be either 0 or at least 0.5 seconds!')
-                return
-            
-            signal_length = int(self.settings['sample_frequency']*self.settings['duration_of_trial'])
-            pulselen = self.settings['sample_frequency']/10
-            pulse = self.get_pulse(pulselen)
-            signal = np.zeros((signal_length))
-            start = int(np.floor((signal_length - pulselen) / 2))
-            end = int(np.ceil((signal_length - pulselen) / 2))
-            signal[start:-end] = pulse
-            signal /= np.max(signal)
-            sample_frequency = self.settings['sample_frequency']
-        else:  # else its a single instance
-            sample_frequency = 0
-            signal = 1
-        
         ###########################################
-        # Select ranges and prepare some variables:
-        sourceMask = np.zeros((self.pos.shape[0]))
-        # If number_of_sources is a range:
-        if isinstance(self.settings['number_of_sources'], (tuple, list)):
-            number_of_sources = random.randrange(*self.settings['number_of_sources'])
-        else:
-            number_of_sources = self.settings['number_of_sources']
+        # Select ranges and prepare some variables
 
+        # Get number of sources is a range:
+        number_of_sources = self.get_from_range(self.settings['number_of_sources'], dtype=int)
+
+        # Get amplitudes for each source
+        extents = [self.get_from_range(self.settings['extents'], dtype=float) for _ in range(number_of_sources)]
+        
+        # Decide shape of sources
         if self.settings['shapes'] == 'both':
             shapes = ['gaussian', 'flat']*number_of_sources
             np.random.shuffle(shapes)
@@ -203,45 +178,77 @@ class Simulation:
 
         elif self.settings['shapes'] == 'gaussian' or self.settings['shapes'] == 'flat':
             shapes = [self.settings.shapes] * number_of_sources
+        
+        # Get extent for each source
+        extents = [self.get_from_range(self.settings['extents'], dtype=float) for _ in range(number_of_sources)]
 
-        if isinstance(self.settings['extents'], (tuple, list)):
-            extents = [random.randrange(*self.settings['extents']) for _ in range(number_of_sources)]
-        else:
-            extents = [self.settings.extents] * number_of_sources
+        # Get amplitude gain for each source (amplitudes come in nAm)
+        amplitudes = [self.get_from_range(self.settings['amplitudes'], dtype=float) * 1e-9 for _ in range(number_of_sources)]
 
-        if isinstance(self.settings['amplitudes'], (tuple, list)):
-            amplitudes = [random.uniform(*self.settings['amplitudes']) for _ in range(number_of_sources)]
-        else:
-            amplitudes = [self.settings['amplitudes']] * number_of_sources
         
         src_centers = np.random.choice(np.arange(self.pos.shape[0]), \
             number_of_sources, replace=False)
 
+
+        if self.settings['duration_of_trial'] > 0:
+            signal_length = int(self.settings['sample_frequency']*self.settings['duration_of_trial'])
+            pulselen = self.settings['sample_frequency']/10
+            # pulse = self.get_pulse(pulselen)
+            
+            signals = []
+            for _ in range(number_of_sources):
+                signal = cn.powerlaw_psd_gaussian(self.get_from_range(self.settings['beta'], dtype=float), signal_length) 
+                signal += np.abs(np.min(signal))
+                signal /= np.max(signal)
+                signals.append(signal)
+
+
+            # signal = np.zeros((signal_length))
+            # start = int(np.floor((signal_length - pulselen) / 2))
+            # end = int(np.ceil((signal_length - pulselen) / 2))
+            # signal[start:-end] = pulse
+            # signal += np.min(signal)
+            # signal /= np.max(signal)
+            
+            sample_frequency = self.settings['sample_frequency']
+        else:  # else its a single instance
+            sample_frequency = 0
+            signal_length = 1
+            signals = [np.array([1])]*number_of_sources
         
-        source = np.zeros((self.pos.shape[0]))
+        
+        # sourceMask = np.zeros((self.pos.shape[0]))
+        source = np.zeros((self.pos.shape[0], signal_length))
         
         ##############################################
         # Loop through source centers (i.e. seeds of source positions)
-        for i, (src_center, shape) in enumerate(zip(src_centers, shapes)):
+        for i, (src_center, shape, amplitude, signal) in enumerate(zip(src_centers, shapes, amplitudes, signals)):
             dists = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))
             d = np.where(dists<extents[i]/2)[0]
 
             if shape == 'gaussian':
                 sd = np.clip(np.max(dists[d]) / 2, a_min=0.1, a_max=np.inf)  # <- works better
-                source[:] += util.gaussian(dists, 0, sd) * amplitudes[i]
+                activity = np.expand_dims(util.gaussian(dists, 0, sd) * amplitude, axis=1) * signal
+                source += activity
             elif shape == 'flat':
-                source[d] += amplitudes[i]
+                activity = util.repeat_newcol(amplitude * signal, len(d)).T
+                if len(activity.shape) == 1:
+                    if len(d) == 1:
+                        activity = np.expand_dims(activity, axis=0)    
+                    else:
+                        activity = np.expand_dims(activity, axis=1)
+                source[d, :] += activity 
             else:
                 msg = BaseException("shape must be of type >string< and be either >gaussian< or >flat<.")
                 raise(msg)
-            sourceMask[d] = 1
+            # sourceMask[d] = 1
 
         # if durOfTrial > 0:
-        n = np.clip(int(sample_frequency * self.settings['duration_of_trial']), a_min=1, a_max=None)
-        sourceOverTime = util.repeat_newcol(source, n)
-        source = np.squeeze(sourceOverTime * signal)
-        if len(source.shape) == 1:
-            source = np.expand_dims(source, axis=1)
+        # n = np.clip(int(sample_frequency * self.settings['duration_of_trial']), a_min=1, a_max=None)
+        # sourceOverTime = util.repeat_newcol(source, n)
+        # source = np.squeeze(sourceOverTime * signal)
+        # if len(source.shape) == 1:
+        #     source = np.expand_dims(source, axis=1)
         
         return source
 
@@ -401,7 +408,10 @@ class Simulation:
             # Check if setting exists and is not None
             if not (key in self.settings.keys() and self.settings[key] is not None):
                 self.settings[key] = DEFAULT_SETTINGS[key]
-        
+        if self.settings['duration_of_trial'] == 0:
+            self.temporal = False
+        else:
+            self.temporal = True
                
     @staticmethod
     def get_pulse(pulse_len):
@@ -420,3 +430,31 @@ class Simulation:
 
         signal = np.sin(2*np.pi*freq*time)
         return signal
+    
+    @staticmethod
+    def get_from_range(val, dtype=int):
+        ''' If list of two integers/floats is given this method outputs a value in between the two values.
+        Otherwise, it returns the value.
+        
+        Parameters
+        ----------
+        val : list/tuple/int/float
+
+        Return
+        ------
+        out : int/float
+
+        '''
+        if dtype==int:
+            rng = random.randrange
+        elif dtype==float:
+            rng = random.uniform
+        else:
+            msg = f'dtype must be int or float, got {type(dtype)} instead'
+            raise AttributeError(msg)
+
+        if isinstance(val, (list, tuple, np.ndarray)):
+            out = rng(*val)
+        elif isinstance(val, (int, float)):
+            out = val
+        return out

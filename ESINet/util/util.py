@@ -2,6 +2,7 @@ import pickle as pkl
 import mne
 import numpy as np
 import os
+from copy import deepcopy
 from ..simulation.simulation import Simulation
 from ..net.net import Net
 

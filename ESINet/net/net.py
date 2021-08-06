@@ -10,12 +10,15 @@ from sklearn import linear_model
 import numpy as np
 from scipy.optimize import minimize_scalar
 from scipy.stats import pearsonr
+from joblib import Parallel, delayed
+from tqdm.notebook import tqdm
 from copy import deepcopy
 import time
 from .. import util
 from ..simulation.simulation import Simulation
 from . import losses
 # import .losses
+
 class Net(keras.Sequential):
     ''' The neural network class that creates and trains the model. 
     Inherits the keras.Sequential class
@@ -41,7 +44,8 @@ class Net(keras.Sequential):
 
     '''
     def __init__(self, fwd, n_layers=1, n_neurons=128, 
-        activation_function='swish', verbose=False):
+        activation_function='swish', parallel=True, 
+        n_jobs=-1, verbose=False):
 
         super().__init__()
         self._embed_fwd(fwd)
@@ -51,7 +55,8 @@ class Net(keras.Sequential):
         self.activation_function = activation_function
         # self.default_loss = tf.keras.losses.Huber(delta=delta)
         self.default_loss = losses.weighted_huber_loss
-        
+        self.parallel = parallel
+        self.n_jobs = n_jobs
         self.verbose = verbose
 
         
@@ -110,12 +115,12 @@ class Net(keras.Sequential):
         Parameters
         ----------
         *args : 
-            Can be either 
+            Can be either two objects: 
                 eeg : mne.Epochs/ numpy.ndarray
                     The simulated EEG data
                 sources : mne.SourceEstimates/ list of mne.SourceEstimates
                     The simulated EEG data
-                or
+                or only one:
                 simulation : esinet.simulation.Simulation
                     The Simulation object
 
@@ -155,7 +160,12 @@ class Net(keras.Sequential):
         self = args[0]
 
         eeg, sources = self._handle_data_input(args)
-        self.subject = sources.subject
+        self.subject = sources.subject if type(sources) == mne.SourceEstimate else sources[0].subject
+
+        if type(sources) == list:
+            self.temporal = True
+        else:
+            self.temporal = False
         # Ensure that the forward model has the same 
         # channels as the eeg object
         self._check_model(eeg)
@@ -209,6 +219,10 @@ class Net(keras.Sequential):
             metrics = [self.default_loss(w=false_positive_penalty, delta=delta), 'mean_squared_error']
 
         self.compile(optimizer, loss, metrics=metrics)
+        if self.temporal:
+            y_scaled = np.reshape(y_scaled, (y_scaled.shape[0], int(np.prod((y_scaled.shape[1], y_scaled.shape[2])))))
+
+
         if device is None:
             # try:
             super(Net, self).fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
@@ -262,56 +276,69 @@ class Net(keras.Sequential):
         
         self = args[0]
         
-        eeg, sources = self._handle_data_input(args)
-        # self.subject = sources.subject
-
-        if isinstance(eeg, mne.epochs.EvokedArray):
+        eeg, _ = self._handle_data_input(args)
+        if isinstance(eeg, util.EVOKED_INSTANCES):
             sfreq = eeg.info['sfreq']
             tmin = eeg.tmin
-            eeg = np.squeeze(eeg.data)
-        elif isinstance(eeg, (mne.epochs.EpochsFIF, mne.epochs.EpochsArray, mne.Epochs)):
+            eeg = eeg.data
+            # add empty trial dimension
+            eeg = np.expand_dims(eeg, axis=0)
+            if len(eeg.shape) == 2:
+                # add empty time dimension
+                eeg = np.expand_dims(eeg, axis=2)
+        elif isinstance(eeg, util.EPOCH_INSTANCES):
             sfreq = eeg.info['sfreq']
             tmin = eeg.tmin
-            eeg = eeg._data  # np.squeeze(EEG.average().data)
-        elif isinstance(eeg, np.ndarray):
-            sfreq = 1
-            tmin = 0
-            eeg = np.squeeze(np.array(eeg))
+            eeg = eeg._data
         else:
-            msg = f'eeg must be of type <numpy.ndarray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
+            msg = f'eeg must be of type <mne.EvokedArray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
             raise ValueError(msg)
 
-        if len(eeg.shape) == 1:
-            eeg = np.expand_dims(eeg, axis=0)
-        
-        if eeg.shape[1] != self.n_channels:
-            eeg = eeg.T
-
         # Prepare EEG to ensure common average reference and appropriate scaling
-        EEG_prepd = deepcopy(eeg)
-        for i in range(eeg.shape[0]):
-            # Common average reference
-            EEG_prepd[i, :] -= np.mean(EEG_prepd[i, :])
-            # Scaling
-            EEG_prepd[i, :] /= np.max(np.abs(EEG_prepd[i, :]))
+        eeg_prep =  self._prep_eeg(eeg)
+        predicted_sources = np.zeros((eeg_prep.shape[0], self.n_dipoles, eeg_prep.shape[2]))
+   
+        # Predict sources in batches of trials
+        for time in range(eeg.shape[2]):
+            
+            predicted_sources[:, :, time] = super(Net, self).predict(eeg_prep[:, :, time])
         
-        # Predict using the model
-        if len(np.squeeze(EEG_prepd).shape) == 3:
-            # predict per trial
-            source_predicted = [super(Net, self).predict(trial) for trial in EEG_prepd]
-            # Scale ConvDips prediction
-            source_predicted_scaled = []
-            predicted_source_estimate = []
-            for trial in range(EEG_prepd.shape[0]):
-                source_predicted_scaled.append( np.squeeze(np.stack([self.solve_p(source_frame, EEG_frame) for source_frame, EEG_frame in zip(source_predicted[trial], eeg[trial])], axis=0)) )
-                predicted_source_estimate.append( util.source_to_sourceEstimate(np.squeeze(source_predicted_scaled[trial]), self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject) )
-        else:
-            source_predicted = super(Net, self).predict(np.squeeze(EEG_prepd))
-            # Scale ConvDips prediction
-            source_predicted_scaled = np.squeeze(np.stack([self.solve_p(source_frame, EEG_frame) for source_frame, EEG_frame in zip(source_predicted, eeg)], axis=0))   
-            predicted_source_estimate = util.source_to_sourceEstimate(np.squeeze(source_predicted_scaled), self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)
+        # Rescale Predicitons
+        predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
+        
+        # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
+        predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[k], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)
+                for k in range(predicted_sources_scaled.shape[0])]
+
+        if len(predicted_source_estimate) == 1:
+            predicted_source_estimate = predicted_source_estimate[0]
 
         return predicted_source_estimate
+
+    def _solve_p_wrap(self, y_est, x_true):
+        ''' Wrapper for parallel (or, alternatively, serial) scaling of predicted sources
+        '''
+        assert len(y_est.shape) == 3, 'Sources must be 3-Dimensional'
+        assert len(x_true.shape) == 3, 'EEG must be 3-Dimensional'
+
+        y_est_scaled = deepcopy(y_est)
+
+        for trial in range(x_true.shape[0]):
+            for time in range(x_true.shape[2]):
+                y_est_scaled[trial, :, time] = self.solve_p(y_est[trial, :, time], x_true[trial, :, time])
+
+        return y_est_scaled
+
+    @staticmethod
+    def _prep_eeg(eeg):
+        eeg_prep = deepcopy(eeg)
+        for trial in range(eeg_prep.shape[0]):
+            for time in range(eeg_prep.shape[2]):
+                # Common average reference
+                eeg_prep[trial, :, time] -= np.mean(eeg_prep[trial, :, time])
+                # Scaling
+                eeg_prep[trial, :, time] /= np.max(np.abs(eeg_prep[trial, :, time]))
+        return eeg_prep
 
     def evaluate_mse(*args):
         ''' Evaluate the model regarding mean squared error
@@ -352,8 +379,36 @@ class Net(keras.Sequential):
 
 
     def _build_model(self):
-        ''' Build the neural network architecture using the 
-        tensorflow.keras.Sequential() API.'''
+        ''' Build the neural network architecture using the tensorflow.keras.Sequential() API. 
+        Depending on the input data this function will either build:
+
+        (1) A simple single hidden layer fully connected ANN for single time instance data
+        (2) A LSTM network for spatio-temporal prediction
+        '''
+        if self.temporal:
+            self._build_temporal_model()
+        else:
+            self._build_perceptron_model()
+        
+
+        if self.verbose:
+            self.summary()
+    
+    def _build_temporal_model(self):
+        input_shape = (self.n_channels, self.n_timepoints)
+        print(input_shape)
+        self.add(layers.InputLayer(input_shape=input_shape))
+        self.add(layers.LSTM(4, return_sequences=True))
+        for _ in range(self.n_layers-1):
+            self.add(layers.LSTM(4, return_sequences=False))
+
+        self.add(layers.Flatten())
+        self.add(layers.Dense(int(self.n_dipoles*self.n_timepoints), 
+            activation=keras.layers.ReLU(max_value=1)))
+        self.build(input_shape=input_shape)
+        
+
+    def _build_perceptron_model(self):
         # Add hidden layers
         for i in range(self.n_layers):
             self.add(layers.Dense(units=self.n_neurons,
@@ -364,9 +419,6 @@ class Net(keras.Sequential):
         
         # Build model with input layer
         self.build(input_shape=(None, self.n_channels))
-
-        if self.verbose:
-            self.summary()
 
     def _check_model(self, eeg):
         ''' Check whether the current forward model has the same 
@@ -387,6 +439,8 @@ class Net(keras.Sequential):
             self.fwd = self.fwd.pick_channels(eeg.ch_names)
             # Write all changes to the attributes
             self._embed_fwd(self.fwd)
+        
+        self.n_timepoints = len(eeg.times)
         # Finally, build model
         self._build_model()
             
@@ -402,7 +456,7 @@ class Net(keras.Sequential):
         x_est = np.matmul(self.leadfield, y_est)
 
         # optimize forward solution
-        tol = 1e-10
+        tol = 1e-3
         options = dict(maxiter=1000, disp=False)
 
         # base scaling
@@ -411,7 +465,7 @@ class Net(keras.Sequential):
         base_scaler = rms_true / rms_est
 
         
-        opt = minimize_scalar(self.mse_opt, args=(self.leadfield, y_est* base_scaler, x_true), \
+        opt = minimize_scalar(self.correlation_criterion, args=(self.leadfield, y_est* base_scaler, x_true), \
             bounds=(0, 1), method='bounded', options=options, tol=tol)
         
         scaler = opt.x
@@ -419,7 +473,7 @@ class Net(keras.Sequential):
         return y_scaled
 
     @staticmethod
-    def mse_opt(scaler, leadfield, y_est, x_true):
+    def correlation_criterion(scaler, leadfield, y_est, x_true):
         x_est = np.matmul(leadfield, y_est) 
         error = np.abs(pearsonr(x_true-x_est, x_true)[0])
         return error
@@ -544,7 +598,7 @@ class BoostNet:
 
         self = args[0]
         eeg, sources = self._handle_data_input(args)
-        self.subject = sources.subject
+        self.subject = sources.subject if type(sources) == mne.SourceEstimate else sources[0].subject
 
         if self.verbose:
             print("Fit neural networks")
