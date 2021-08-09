@@ -1,7 +1,3 @@
-from random import sample
-
-from tensorflow.python.keras.losses import mean_squared_error
-from esinet.simulation.simulation import Simulation
 import mne
 import tensorflow as tf
 from tensorflow import keras
@@ -10,14 +6,9 @@ from sklearn import linear_model
 import numpy as np
 from scipy.optimize import minimize_scalar
 from scipy.stats import pearsonr
-from joblib import Parallel, delayed
-from tqdm.notebook import tqdm
 from copy import deepcopy
-import time
-from .. import util
-from ..simulation.simulation import Simulation
+from . import util
 from . import losses
-# import .losses
 
 class Net(keras.Sequential):
     ''' The neural network class that creates and trains the model. 
@@ -59,9 +50,6 @@ class Net(keras.Sequential):
         self.n_jobs = n_jobs
         self.verbose = verbose
 
-        
-    
-        
     def _embed_fwd(self, fwd):
         ''' Saves crucial attributes from the Forward model.
         

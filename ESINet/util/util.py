@@ -3,8 +3,8 @@ import mne
 import numpy as np
 import os
 from copy import deepcopy
-from ..simulation.simulation import Simulation
-from ..net.net import Net
+from .. import simulation
+from .. import net
 
 EPOCH_INSTANCES = (mne.epochs.EpochsArray, mne.Epochs, mne.EpochsArray, mne.epochs.EpochsFIF)
 EVOKED_INSTANCES = (mne.Evoked, mne.EvokedArray)
@@ -323,10 +323,10 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), data_span=(0, 0.5
     # Calculate signal to noise ratio of the data
     target_snr = calc_snr_range(data_obj, baseline_span=baseline_span, data_span=data_span)
     # Simulate sample M/EEG data
-    simulation = Simulation(fwd, data_obj.info, settings=dict(duration_of_trial=0, target_snr=target_snr), parallel=parallel, verbose=True)
+    simulation = simulation.Simulation(fwd, data_obj.info, settings=dict(duration_of_trial=0, target_snr=target_snr), parallel=parallel, verbose=True)
     simulation.simulate(n_samples=n_samples)
     # Train neural network
-    net = Net(fwd, verbose=verbose)
+    net = net.Net(fwd, verbose=verbose)
     net.fit(simulation, optimizer=optimizer, learning_rate=learning_rate, 
         validation_split=validation_split, epochs=n_epochs, metrics=metrics,
         device=device, delta=delta, batch_size=batch_size, loss=loss)

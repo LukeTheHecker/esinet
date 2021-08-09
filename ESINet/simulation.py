@@ -5,8 +5,7 @@ from joblib import Parallel, delayed
 from tqdm.notebook import tqdm
 import colorednoise as cn
 
-from ..util import util
-
+from . import util
 
 DEFAULT_SETTINGS = {
             'number_of_sources': (1, 5),
@@ -180,7 +179,7 @@ class Simulation:
                 shapes = [shapes]
 
         elif self.settings['shapes'] == 'gaussian' or self.settings['shapes'] == 'flat':
-            shapes = [self.settings.shapes] * number_of_sources
+            shapes = [self.settings['shapes']] * number_of_sources
         
         # Get extent for each source
         extents = [self.get_from_range(self.settings['extents'], dtype=float) for _ in range(number_of_sources)]
@@ -338,7 +337,6 @@ class Simulation:
 
         return epochs
     
-
     def create_eeg_helper(self, eeg_sample, n_simulation_trials, target_snr, beta):
         ''' Helper function for EEG simulation that transforms a clean 
             M/EEG signal to a bunch of noisy trials.
@@ -397,9 +395,6 @@ class Simulation:
         out = x + noise*noise_scaler  
 
         return out
-
-
-    
 
     def check_settings(self):
         ''' Check if settings are complete and insert missing 
