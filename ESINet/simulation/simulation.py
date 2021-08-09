@@ -1,10 +1,7 @@
 from copy import deepcopy
 import numpy as np
-import mne
 import random
 from joblib import Parallel, delayed
-from numpy.lib.utils import source
-from scipy.sparse import data
 from tqdm.notebook import tqdm
 import colorednoise as cn
 
@@ -31,27 +28,25 @@ class Simulation:
         The Settings for the simulation. Keys:
 
         n_sources : int/tuple/list
-            number of sources. Can be a single number or a 
-            list of two numbers specifying a range.
-        extents : int/float/tuple/list
-            size of sources in mm. 
-            Can be a single number or a list of two numbers 
+            number of sources. Can be a single number or a list of two numbers 
             specifying a range.
+        extents : int/float/tuple/list
+            size of sources in mm. Can be a single number or a list of two 
+            numbers specifying a range.
         amplitudes : int/float/tuple/list
             the current of the source in nAm
         shape : str
-            How the amplitudes evolve over space. Can be 
-            'gaussian' or 'flat' (i.e. uniform) or 'both'.
+            How the amplitudes evolve over space. Can be 'gaussian' or 'flat' 
+            (i.e. uniform) or 'both'.
         durOfTrial : int/float
             specifies the duration of a trial.
         sample_frequency : int
             specifies the sample frequency of the data.
     fwd : mne.Forward
-        The mne-python Forward object that contains the 
-        forward model
+        The mne-python Forward object that contains the forward model
     source_data : mne.sourceEstimate
-        A source estimate object from mne-python which 
-        contains the source data.
+        A source estimate object from mne-python which contains the source 
+        data.
     eeg_data : mne.Epochs
         A mne.Epochs object which contains the EEG data.
     n_jobs : int
@@ -101,8 +96,8 @@ class Simulation:
         if self.parallel:
             if self.verbose:
                 print(f'Simulate Source')
-            source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')(
-                delayed(self.simulate_source)() 
+            source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                (delayed(self.simulate_source)() 
                 for i in tqdm(range(n_samples))))
         else:
             source_data = np.stack([self.simulate_source() 
@@ -118,18 +113,20 @@ class Simulation:
             if self.parallel:
                 sources = Parallel(n_jobs=self.n_jobs, backend='loky')(
                     delayed(util.source_to_sourceEstimate)
-                    (source, self.fwd, sfreq=self.settings['sample_frequency'], subject=self.subject) 
+                    (source, self.fwd, sfreq=self.settings['sample_frequency'], 
+                    subject=self.subject) 
                     for source in tqdm(source_data))
             else:
                 sources = [util.source_to_sourceEstimate(source, 
-                    self.fwd, sfreq=self.settings['sample_frequency'], subject=self.subject) 
+                    self.fwd, sfreq=self.settings['sample_frequency'], 
+                    subject=self.subject) 
                     for source in tqdm(source_data)]
 
         return sources
     
     def simulate_source(self):
-        ''' Returns a vector containing the dipole currents. Requires only a dipole 
-        position list and the simulation settings.
+        ''' Returns a vector containing the dipole currents. Requires only a 
+        dipole position list and the simulation settings.
 
         Parameters
         ----------
@@ -153,20 +150,26 @@ class Simulation:
         
         Return
         ------
-        source : numpy.ndarray, (n_dipoles x n_timepoints), the simulated source signal
+        source : numpy.ndarray, (n_dipoles x n_timepoints), the simulated 
+            source signal
         simSettings : dict, specifications about the source.
 
-        Grova, C., Daunizeau, J., Lina, J. M., Bénar, C. G., Benali, H., & Gotman, J. (2006). Evaluation of EEG localization methods using realistic simulations of interictal spikes. Neuroimage, 29(3), 734-753.
+        Grova, C., Daunizeau, J., Lina, J. M., Bénar, C. G., Benali, H., & 
+            Gotman, J. (2006). Evaluation of EEG localization methods using 
+            realistic simulations of interictal spikes. Neuroimage, 29(3), 
+            734-753.
         '''
         
         ###########################################
         # Select ranges and prepare some variables
 
         # Get number of sources is a range:
-        number_of_sources = self.get_from_range(self.settings['number_of_sources'], dtype=int)
+        number_of_sources = self.get_from_range(
+            self.settings['number_of_sources'], dtype=int)
 
         # Get amplitudes for each source
-        extents = [self.get_from_range(self.settings['extents'], dtype=float) for _ in range(number_of_sources)]
+        extents = [self.get_from_range(self.settings['extents'], dtype=float) 
+            for _ in range(number_of_sources)]
         
         # Decide shape of sources
         if self.settings['shapes'] == 'both':
@@ -400,7 +403,6 @@ class Simulation:
 
     def check_settings(self):
         ''' Check if settings are complete and insert missing 
-        
             entries if there are any.
         '''
 

@@ -89,11 +89,7 @@ def source_to_sourceEstimate(data, fwd, sfreq=1, subject='fsaverage',
 def eeg_to_Epochs(data, pth_fwd, info=None):
     if info is None:
         info = load_info(pth_fwd)
-    # If only one time point...
-    # if data.shape[-1] == 1:
-    #     # ...set sampling frequency to 1
-    #     info['sfreq'] = 1
-    # print(f'data.shape={data.shape}')
+
     epochs = mne.EpochsArray(data, info, verbose=0)
     try:
         epochs.set_eeg_reference('average', projection=True, verbose=0)
@@ -103,21 +99,40 @@ def eeg_to_Epochs(data, pth_fwd, info=None):
     return epochs
 
 def rms(x):
+    ''' Calculate the root mean square of some signal x.
+    Parameters
+    ----------
+    x : numpy.ndarray, list
+        The signal/data.
+
+    Return
+    ------
+    rms : float
+    '''
     return np.sqrt(np.mean(np.square(x)))
 
 def unpack_fwd(fwd):
-    """Helper function that extract the most important data structures from the mne.Forward object
-    Paramters:
-    ----------
-    fwd : mne.Forward, The mne Forward model
+    """ Helper function that extract the most important data structures from the 
+    mne.Forward object
 
-    Return:
-    -------
-    fwd_fixed : mne.Forward, Forward model for fixed dipole orientations
-    leadfield : numpy.ndarray, the leadfield (gain matrix)
-    pos : numpy.ndarray, the positions of dipoles in the source model
-    tris : numpy.ndarray, the triangles that describe the source mmodel
-    neighbors : numpy.ndarray, the neighbors of each dipole in the source model
+    Parameters
+    ----------
+    fwd : mne.Forward
+        The forward model object
+
+    Return
+    ------
+    fwd_fixed : mne.Forward
+        Forward model for fixed dipole orientations
+    leadfield : numpy.ndarray
+        The leadfield (gain matrix)
+    pos : numpy.ndarray
+        The positions of dipoles in the source model
+    tris : numpy.ndarray
+        The triangles that describe the source mmodel
+    neighbors : numpy.ndarray
+        the neighbors of each dipole in the source model
+
     """
     if fwd['surf_ori']:
         fwd_fixed = fwd
@@ -138,7 +153,6 @@ def unpack_fwd(fwd):
         pos_right = mne.vertex_to_mni(source[1]['vertno'],  1, subject_his_id, verbose=0)
 
     pos = np.concatenate([pos_left, pos_right], axis=0)
-    # neighbors = get_neighbors(fwd)
 
     return fwd_fixed, leadfield, pos, tris#
 
@@ -146,15 +160,19 @@ def unpack_fwd(fwd):
 def calc_snr_range(mne_obj, baseline_span=(-0.2, 0.0), data_span=(0.0, 0.5)):
     """ Calculate the signal to noise ratio (SNR) range of your mne object.
     
-    Parameters:
-    -----------
-    mne_obj : mne.Epochs or mne.Evoked object. The mne object that contains your m/eeg data.
-    baseline_span : tuple, list. The range in seconds that defines the baseline interval.
-    data_span : tuple, list. The range in seconds that defines the data (signal) interval.
+    Parameters
+    ----------
+    mne_obj : mne.Epochs, mne.Evoked
+        The mne object that contains your m/eeg data.
+    baseline_span : tuple, list
+        The range in seconds that defines the baseline interval.
+    data_span : tuple, list
+        The range in seconds that defines the data (signal) interval.
     
-    Return:
-    -------
-    snr_range : list, range of SNR values in your data.
+    Return
+    ------
+    snr_range : list
+        range of SNR values in your data.
 
     """
 
@@ -174,7 +192,7 @@ def calc_snr_range(mne_obj, baseline_span=(-0.2, 0.0), data_span=(0.0, 0.5)):
     gfp = np.std(data, axis=0)
     snr_lo = gfp[data_range].min() / gfp[baseline_range].max() 
     snr_hi = gfp[data_range].max() / gfp[baseline_range].min()
-    # snr_mean = gfp[data_range].mean() / gfp[baseline_range].mean()
+
     snr_range = [snr_lo, snr_hi]
     return snr_range
 
@@ -200,8 +218,21 @@ def get_n_order_indices(order, pick_idx, neighbors):
 
     return np.unique(np.array(current_indices))
 
-def gaussian(x, mu, sig):
-    return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
+def gaussian(x, mu, sigma):
+    ''' Gaussian distribution function.
+    
+    Parameters
+    ----------
+    x : numpy.ndarray, list
+        The x-value.
+    mu : float
+        The mean of the gaussian kernel.
+    sigma : float
+        The standard deviation of the gaussian kernel.
+    Return
+    ------
+    '''
+    return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sigma, 2.)))
 
 def get_triangle_neighbors(tris_lr):
     if not np.all(np.unique(tris_lr[0]) == np.arange(len(np.unique(tris_lr[0])))):

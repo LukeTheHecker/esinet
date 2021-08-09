@@ -20,6 +20,7 @@ def run_simulations_test(pth_fwd='temp/ico2/'):
     amplitudes_list = [(5, 10), 3]
     shape_list = ['gaussian', 'flat', 'both']
     durOfTrial_list = [0, 1]
+    
     sampleFreq_list = [1, 10]
     regionGrowing_list = [True, False]
     return_raw_data_list = [True, False]

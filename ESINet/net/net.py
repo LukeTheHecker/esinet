@@ -63,11 +63,18 @@ class Net(keras.Sequential):
     
         
     def _embed_fwd(self, fwd):
-            _, leadfield, _, _ = util.unpack_fwd(fwd)
-            self.fwd = deepcopy(fwd)
-            self.leadfield = leadfield
-            self.n_channels = leadfield.shape[0]
-            self.n_dipoles = leadfield.shape[1]
+        ''' Saves crucial attributes from the Forward model.
+        
+        Parameters
+        ----------
+        fwd : mne.Forward
+            The forward model object.
+        '''
+        _, leadfield, _, _ = util.unpack_fwd(fwd)
+        self.fwd = deepcopy(fwd)
+        self.leadfield = leadfield
+        self.n_channels = leadfield.shape[0]
+        self.n_dipoles = leadfield.shape[1]
         
     def _handle_data_input(self, arguments):
         ''' Handles data input to the functions fit() and predict().
@@ -102,8 +109,6 @@ class Net(keras.Sequential):
         else:
             msg = f'Input is {type()} must be either the EEG data and Source data or the Simulation object.'
             raise AttributeError(msg)
-
-
 
         return eeg, sources
 
@@ -224,14 +229,14 @@ class Net(keras.Sequential):
 
 
         if device is None:
-            # try:
-            super(Net, self).fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
-                validation_split=validation_split, verbose=self.verbose, callbacks=[es],
-                sample_weight=sample_weight)
-            # except:
-            # super().fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
-            #     validation_split=validation_split, verbose=self.verbose, callbacks=[es],
-            #     sample_weight=sample_weight)
+            try:
+                super(Net, self).fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
+                    validation_split=validation_split, verbose=self.verbose, callbacks=[es],
+                    sample_weight=sample_weight)
+            except:
+                super().fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
+                    validation_split=validation_split, verbose=self.verbose, callbacks=[es],
+                    sample_weight=sample_weight)
         else:
             with tf.device(device):
                 try:
@@ -244,16 +249,7 @@ class Net(keras.Sequential):
                         sample_weight=sample_weight)
         return self
 
-    def train(*args, optimizer=None, learning_rate=0.001, 
-        validation_split=0.1, epochs=100, metrics=None, device=None, delta=1, 
-        batch_size=128, loss=None):
-        ''' Train the neural network using training data (eeg) and labels (sources).
-        '''
-        self = args[0]
-        self.fit(args[1:], optimizer=optimizer, learning_rate=learning_rate, 
-            validation_split=validation_split, epochs=epochs, metrics=metrics, device=device, delta=delta, 
-            batch_size=batch_size, loss=loss)
-    
+
     def predict(*args):
         ''' Predict sources from EEG data.
 
@@ -316,7 +312,8 @@ class Net(keras.Sequential):
         return predicted_source_estimate
 
     def _solve_p_wrap(self, y_est, x_true):
-        ''' Wrapper for parallel (or, alternatively, serial) scaling of predicted sources
+        ''' Wrapper for parallel (or, alternatively, serial) scaling of 
+        predicted sources.
         '''
         assert len(y_est.shape) == 3, 'Sources must be 3-Dimensional'
         assert len(x_true.shape) == 3, 'EEG must be 3-Dimensional'
@@ -331,6 +328,11 @@ class Net(keras.Sequential):
 
     @staticmethod
     def _prep_eeg(eeg):
+        ''' Takes a 3D EEG array and re-references to common average and scales 
+        individual scalp maps to max(abs(scalp_map) == 1
+        '''
+        assert len(eeg.shape) == 3, 'Input array <eeg> has wrong shape.'
+
         eeg_prep = deepcopy(eeg)
         for trial in range(eeg_prep.shape[0]):
             for time in range(eeg_prep.shape[2]):
@@ -395,6 +397,8 @@ class Net(keras.Sequential):
             self.summary()
     
     def _build_temporal_model(self):
+        ''' Build the temporal artificial neural network model using LSTM layers.
+        '''
         input_shape = (self.n_channels, self.n_timepoints)
         print(input_shape)
         self.add(layers.InputLayer(input_shape=input_shape))
@@ -409,6 +413,8 @@ class Net(keras.Sequential):
         
 
     def _build_perceptron_model(self):
+        ''' Build the artificial neural network model using Dense layers.
+        '''
         # Add hidden layers
         for i in range(self.n_layers):
             self.add(layers.Dense(units=self.n_neurons,
@@ -447,6 +453,20 @@ class Net(keras.Sequential):
             
         
     def solve_p(self, y_est, x_true):
+        '''
+        Parameters
+        ---------
+        y_est : numpy.ndarray
+            The estimated source vector.
+        x_true : numpy.ndarray
+            The original input EEG vector.
+        
+        Return
+        ------
+        y_scaled : numpy.ndarray
+            The scaled estimated source vector.
+        
+        '''
         # Check if y_est is just zeros:
         if np.max(y_est) == 0:
             return y_est
@@ -474,6 +494,21 @@ class Net(keras.Sequential):
 
     @staticmethod
     def correlation_criterion(scaler, leadfield, y_est, x_true):
+        ''' Perform forward projections of a source using the leadfield.
+        This is the objective function which is minimized in Net::solve_p().
+        
+        Parameters
+        ----------
+        scaler : float
+            scales the source y_est
+        leadfield : numpy.ndarray
+            The leadfield (or sometimes called gain matrix).
+        y_est : numpy.ndarray
+            Estimated/predicted source.
+        x_true : numpy.ndarray
+            True, unscaled EEG.
+        '''
+
         x_est = np.matmul(leadfield, y_est) 
         error = np.abs(pearsonr(x_true-x_est, x_true)[0])
         return error
@@ -538,7 +573,7 @@ class EnsembleNet:
         return np.mean(predictions_data, axis=0)
 
 class BoostNet:
-    ''' The Bossted neural network class that creates and trains the boosted model. 
+    ''' The Boosted neural network class that creates and trains the boosted model. 
         
     Attributes
     ----------
