@@ -10,7 +10,7 @@ def weighted_mse_loss(weight=1, min_val=1e-3):
     Parameters
     ----------
     weight : float
-        weighting factor
+        Weighting factor which penalizes false positives.
     min_val : float
         The threshold below which the target is set to zero.
 
@@ -40,7 +40,7 @@ def weighted_huber_loss(weight=1.0, delta=1.0, min_val=1e-3):
     Parameters
     ----------
     weight : float
-        weighting factor
+        Weighting factor which penalizes false positives.
     delta : float
         The delta parameter of the Huber loss. Must be non-negative.
     min_val : float
@@ -74,7 +74,7 @@ def weighted_mae_loss(w=1, min_val=1e-3):
     Parameters
     ----------
     weight : float
-        weighting factor
+        Weighting factor which penalizes false positives.
     min_val : float
         The threshold below which the target is set to zero.
 

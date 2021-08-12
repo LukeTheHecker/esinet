@@ -7,6 +7,7 @@ import numpy as np
 from scipy.optimize import minimize_scalar
 from scipy.stats import pearsonr
 from copy import deepcopy
+from time import time
 from . import util
 from . import losses
 
@@ -31,9 +32,8 @@ class Net(keras.Sequential):
     train : trains the neural network with the EEG and source data
     predict : perform prediciton on EEG data
     evaluate : evaluate the performance of the model
-    
-
     '''
+    
     def __init__(self, fwd, n_layers=1, n_neurons=128, 
         activation_function='swish', parallel=True, 
         n_jobs=-1, verbose=False):
@@ -80,27 +80,27 @@ class Net(keras.Sequential):
             The source data.
 
         '''
-        if len(arguments) == 2:
-            if isinstance(arguments[1], (mne.Epochs, mne.Evoked, mne.io.Raw, mne.EpochsArray, mne.EvokedArray, mne.epochs.EpochsFIF)):
-                eeg = arguments[1]
+        if len(arguments) == 1:
+            if isinstance(arguments[0], (mne.Epochs, mne.Evoked, mne.io.Raw, mne.EpochsArray, mne.EvokedArray, mne.epochs.EpochsFIF)):
+                eeg = arguments[0]
                 sources = None
             else:
-                simulation = arguments[1]
+                simulation = arguments[0]
                 eeg = simulation.eeg_data
                 sources = simulation.source_data
                 # msg = f'First input should be of type simulation or Epochs, but {arguments[1]} is {type(arguments[1])}'
                 # raise AttributeError(msg)
 
-        elif len(arguments) == 3:
-            eeg = arguments[1]
-            sources = arguments[2]
+        elif len(arguments) == 2:
+            eeg = arguments[0]
+            sources = arguments[1]
         else:
             msg = f'Input is {type()} must be either the EEG data and Source data or the Simulation object.'
             raise AttributeError(msg)
 
         return eeg, sources
 
-    def fit(*args, optimizer=None, learning_rate=0.001, 
+    def fit(self, *args, optimizer=None, learning_rate=0.001, 
         validation_split=0.1, epochs=100, metrics=None, device=None, false_positive_penalty=2, 
         delta=1., batch_size=128, loss=None, sample_weight=None):
         ''' Train the neural network using training data (eeg) and labels (sources).
@@ -134,7 +134,7 @@ class Net(keras.Sequential):
             The metrics to be used for performance monitoring during training.
         device : str
             The device to use, e.g. a graphics card.
-        false_positive_penalty : int
+        false_positive_penalty : float
             Defines weighting of false-positive predictions. Increase for conservative 
             inverse solutions, decrease for liberal prediction.
         batch_size : int
@@ -150,7 +150,6 @@ class Net(keras.Sequential):
 
         '''
 
-        self = args[0]
 
         eeg, sources = self._handle_data_input(args)
         self.subject = sources.subject if type(sources) == mne.SourceEstimate else sources[0].subject
@@ -204,12 +203,12 @@ class Net(keras.Sequential):
         if optimizer is None:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         if loss is None:
-            loss = self.default_loss(w=false_positive_penalty, delta=delta)
+            loss = self.default_loss(weight=false_positive_penalty, delta=delta)
 
         elif type(loss) == list:
             loss = loss[0](*loss[1])
         if metrics is None:
-            metrics = [self.default_loss(w=false_positive_penalty, delta=delta), 'mean_squared_error']
+            metrics = [self.default_loss(weight=false_positive_penalty, delta=delta), 'mean_squared_error']
 
         self.compile(optimizer, loss, metrics=metrics)
         if self.temporal:
@@ -238,7 +237,7 @@ class Net(keras.Sequential):
         return self
 
 
-    def predict(*args):
+    def predict(self, *args):
         ''' Predict sources from EEG data.
 
         Parameters
@@ -258,10 +257,15 @@ class Net(keras.Sequential):
         outsource : either numpy.ndarray (if dtype='raw') or mne.SourceEstimate instance
         '''
         
-        self = args[0]
         
         eeg, _ = self._handle_data_input(args)
+        
+        
+
         if isinstance(eeg, util.EVOKED_INSTANCES):
+            # Ensure there are no extra channels in our EEG
+            eeg = eeg.pick_channels(self.fwd.ch_names)    
+
             sfreq = eeg.info['sfreq']
             tmin = eeg.tmin
             eeg = eeg.data
@@ -271,25 +275,30 @@ class Net(keras.Sequential):
                 # add empty time dimension
                 eeg = np.expand_dims(eeg, axis=2)
         elif isinstance(eeg, util.EPOCH_INSTANCES):
+            # Ensure there are no extra channels in our EEG
+            eeg = eeg.pick_channels(self.fwd.ch_names)
+            eeg.load_data()
+
             sfreq = eeg.info['sfreq']
             tmin = eeg.tmin
             eeg = eeg._data
         else:
             msg = f'eeg must be of type <mne.EvokedArray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
             raise ValueError(msg)
-
+        
         # Prepare EEG to ensure common average reference and appropriate scaling
         eeg_prep =  self._prep_eeg(eeg)
-        predicted_sources = np.zeros((eeg_prep.shape[0], self.n_dipoles, eeg_prep.shape[2]))
-   
-        # Predict sources in batches of trials
-        for time in range(eeg.shape[2]):
-            
-            predicted_sources[:, :, time] = super(Net, self).predict(eeg_prep[:, :, time])
+        
+        # Predicted sources all in one go
+        predicted_sources = self.predict_sources(eeg_prep)
+        
+        
+        
         
         # Rescale Predicitons
-        predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
-        
+        # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
+        predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
+
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
         predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[k], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)
                 for k in range(predicted_sources_scaled.shape[0])]
@@ -298,6 +307,47 @@ class Net(keras.Sequential):
             predicted_source_estimate = predicted_source_estimate[0]
 
         return predicted_source_estimate
+
+    def predict_sources(self, eeg):
+        ''' Predict sources of 3D EEG (samples, channels, time) by reshaping 
+        to speed up the process.
+        
+        Parameters
+        ----------
+        eeg : numpy.ndarray
+            3D numpy array of EEG data (samples, channels, time)
+        '''
+        assert len(eeg.shape)==3, 'eeg must be a 3D numpy array of dim (samples, channels, time)'
+        print(eeg.shape)
+        # Predict sources all at once
+        n_samples, n_elec, n_time = eeg.shape
+        ## swap electrode and time axis
+        eeg_tmp = np.swapaxes(eeg, 1, 2)
+        ## reshape axis
+        new_shape = (n_samples*n_time, n_elec)
+        eeg_tmp = eeg_tmp.reshape(new_shape)
+        ## predict
+        predicted_sources = super(Net, self).predict(eeg_tmp)
+        ## Get to old shape
+        predicted_sources = predicted_sources.reshape(n_samples, n_time, self.n_dipoles)
+        predicted_sources = np.swapaxes(predicted_sources, 1,2)
+
+        return predicted_sources
+
+    def _scale_p_wrap(self, y_est, x_true):
+        ''' Wrapper for parallel (or, alternatively, serial) scaling of 
+        predicted sources.
+        '''
+        assert len(y_est.shape) == 3, 'Sources must be 3-Dimensional'
+        assert len(x_true.shape) == 3, 'EEG must be 3-Dimensional'
+
+        y_est_scaled = deepcopy(y_est)
+
+        for trial in range(x_true.shape[0]):
+            for time in range(x_true.shape[2]):
+                y_est_scaled[trial, :, time] = self.scale_p(y_est[trial, :, time], x_true[trial, :, time])
+
+        return y_est_scaled
 
     def _solve_p_wrap(self, y_est, x_true):
         ''' Wrapper for parallel (or, alternatively, serial) scaling of 
@@ -330,7 +380,7 @@ class Net(keras.Sequential):
                 eeg_prep[trial, :, time] /= np.max(np.abs(eeg_prep[trial, :, time]))
         return eeg_prep
 
-    def evaluate_mse(*args):
+    def evaluate_mse(self, *args):
         ''' Evaluate the model regarding mean squared error
         
         Parameters
@@ -358,7 +408,6 @@ class Net(keras.Sequential):
         print(mean_squared_errors.mean())
         '''
 
-        self = args[0]
         eeg, sources = self._handle_data_input(args)
         
         y_hat = self.predict(eeg).data
@@ -438,10 +487,9 @@ class Net(keras.Sequential):
         # Finally, build model
         self._build_model()
             
-            
-        
-    def solve_p(self, y_est, x_true):
-        '''
+    def scale_p(self, y_est, x_true):
+        ''' Scale the prediction to yield same estimated GFP as true GFP
+
         Parameters
         ---------
         y_est : numpy.ndarray
@@ -451,7 +499,7 @@ class Net(keras.Sequential):
         
         Return
         ------
-        y_scaled : numpy.ndarray
+        y_est_scaled : numpy.ndarray
             The scaled estimated source vector.
         
         '''
@@ -462,23 +510,51 @@ class Net(keras.Sequential):
         x_true = np.squeeze(np.array(x_true))
         # Get EEG from predicted source using leadfield
         x_est = np.matmul(self.leadfield, y_est)
+        gfp_true = np.std(x_true)
+        gfp_est = np.std(x_est)
+        scaler = gfp_true / gfp_est
+        y_est_scaled = y_est * scaler
+        return y_est_scaled
+        
+    # def solve_p(self, y_est, x_true):
+    #     '''
+    #     Parameters
+    #     ---------
+    #     y_est : numpy.ndarray
+    #         The estimated source vector.
+    #     x_true : numpy.ndarray
+    #         The original input EEG vector.
+        
+    #     Return
+    #     ------
+    #     y_scaled : numpy.ndarray
+    #         The scaled estimated source vector.
+        
+    #     '''
+    #     # Check if y_est is just zeros:
+    #     if np.max(y_est) == 0:
+    #         return y_est
+    #     y_est = np.squeeze(np.array(y_est))
+    #     x_true = np.squeeze(np.array(x_true))
+    #     # Get EEG from predicted source using leadfield
+    #     x_est = np.matmul(self.leadfield, y_est)
 
-        # optimize forward solution
-        tol = 1e-3
-        options = dict(maxiter=1000, disp=False)
+    #     # optimize forward solution
+    #     tol = 1e-3
+    #     options = dict(maxiter=1000, disp=False)
 
-        # base scaling
-        rms_est = np.mean(np.abs(x_est))
-        rms_true = np.mean(np.abs(x_true))
-        base_scaler = rms_true / rms_est
+    #     # base scaling
+    #     rms_est = np.mean(np.abs(x_est))
+    #     rms_true = np.mean(np.abs(x_true))
+    #     base_scaler = rms_true / rms_est
 
         
-        opt = minimize_scalar(self.correlation_criterion, args=(self.leadfield, y_est* base_scaler, x_true), \
-            bounds=(0, 1), method='bounded', options=options, tol=tol)
+    #     opt = minimize_scalar(self.correlation_criterion, args=(self.leadfield, y_est* base_scaler, x_true), \
+    #         bounds=(0, 1), method='bounded', options=options, tol=tol)
         
-        scaler = opt.x
-        y_scaled = y_est * scaler * base_scaler
-        return y_scaled
+    #     scaler = opt.x
+    #     y_scaled = y_est * scaler * base_scaler
+    #     return y_scaled
 
     @staticmethod
     def correlation_criterion(scaler, leadfield, y_est, x_true):
@@ -547,8 +623,7 @@ class EnsembleNet:
             raise AttributeError(msg)
         
 
-    def predict(*args):
-        self = args[0]
+    def predict(self, *args):
         predictions = [net.predict(args[1]) for net in self.nets]
         predictions_data = np.stack([prediction.data for prediction in predictions], axis=0)
         
@@ -596,7 +671,7 @@ class BoostNet:
         self.verbose=verbose
         self.n_nets = n_nets
 
-    def fit(*args, **kwargs):
+    def fit(self, *args, **kwargs):
         ''' Train the boost model.
 
         Parameters
@@ -619,7 +694,6 @@ class BoostNet:
         self : BoostNet()
         '''
 
-        self = args[0]
         eeg, sources = self._handle_data_input(args)
         self.subject = sources.subject if type(sources) == mne.SourceEstimate else sources[0].subject
 
@@ -636,7 +710,7 @@ class BoostNet:
 
         return self
     
-    def predict(*args):
+    def predict(self, *args):
         ''' Perform prediction of sources based on EEG data using the Boosted Model.
         
         Parameters
@@ -657,7 +731,6 @@ class BoostNet:
         ------
         '''
 
-        self = args[0]
         eeg, sources = self._handle_data_input(args)
 
         ensemble_predictions, y_hats = self._get_ensemble_predictions(eeg, sources)
@@ -667,7 +740,7 @@ class BoostNet:
         y_hat.data = prediction.T
         return y_hat
 
-    def evaluate_mse(*args):
+    def evaluate_mse(self, *args):
         ''' Evaluate the model regarding mean squared error
         
         Parameters
@@ -695,7 +768,6 @@ class BoostNet:
         print(mean_squared_errors.mean())
         '''
 
-        self = args[0]
         eeg, sources = self._handle_data_input(args)
         y_hat = self.predict(eeg, sources).data
         y_true = sources.data
@@ -703,27 +775,33 @@ class BoostNet:
         return mean_squared_errors
 
 
-    def _get_ensemble_predictions(*args):
-        self = args[0]
+    def _get_ensemble_predictions(self, *args):
+
         eeg, sources = self._handle_data_input(args)
 
         y_hats = [subnet.predict(eeg, sources) for subnet in self.nets]
-        
-        ensemble_predictions = np.stack([y_hat.data for y_hat in y_hats], axis=0).T
+        print(f'y_hats[0]: {y_hats[0]}')
+        ensemble_predictions = np.stack([y_hat[0].data for y_hat in y_hats], axis=0).T
         ensemble_predictions = ensemble_predictions.reshape(ensemble_predictions.shape[0], np.prod((ensemble_predictions.shape[1], ensemble_predictions.shape[2])))
-     
+        print(ensemble_predictions.shape)
         return ensemble_predictions, y_hats
 
-    def _fit_nets(*args, **kwargs):
-        self = args[0]
+    def _fit_nets(self, *args, **kwargs):
+
         eeg, sources = self._handle_data_input(args)
-
-        sample_weight = np.ones((sources._data.shape[1]))
-
+        n_samples = eeg.get_data().shape[0]
+        # sample_weight = np.ones((sources._data.shape[1]))
+        
         for net in self.nets:
-            net.fit(eeg, sources, **kwargs, sample_weight=sample_weight)
-            sample_weight = net.evaluate_mse(eeg, sources)
-            print(f'new sample weights: mean={sample_weight.mean()} +- {sample_weight.std()}')
+            sample_idc = np.random.choice(np.arange(n_samples), 
+                int(0.8*n_samples), replace=True)
+            print(f'new idc: {sample_idc}')
+            eeg_bootstrap = eeg.copy()[sample_idc]
+            sources_bootstrap = sources.copy()
+            sources_bootstrap.data = sources_bootstrap.data[:, sample_idc]
+            net.fit(eeg_bootstrap, sources_bootstrap, **kwargs)#, sample_weight=sample_weight)
+            # sample_weight = net.evaluate_mse(eeg, sources)
+            # print(f'new sample weights: mean={sample_weight.mean()} +- {sample_weight.std()}')
 
         
     def _handle_data_input(self, arguments):
@@ -742,20 +820,20 @@ class BoostNet:
             The source data.
 
         '''
-        if len(arguments) == 2:
-            if isinstance(arguments[1], (mne.Epochs, mne.Evoked, mne.io.Raw, mne.EpochsArray, mne.EvokedArray, mne.epochs.EpochsFIF)):
-                eeg = arguments[1]
+        if len(arguments) == 1:
+            if isinstance(arguments[0], (mne.Epochs, mne.Evoked, mne.io.Raw, mne.EpochsArray, mne.EvokedArray, mne.epochs.EpochsFIF)):
+                eeg = arguments[0]
                 sources = None
             else:
-                simulation = arguments[1]
+                simulation = arguments[0]
                 eeg = simulation.eeg_data
                 sources = simulation.source_data
                 # msg = f'First input should be of type simulation or Epochs, but {arguments[1]} is {type(arguments[1])}'
                 # raise AttributeError(msg)
 
-        elif len(arguments) == 3:
-            eeg = arguments[1]
-            sources = arguments[2]
+        elif len(arguments) == 2:
+            eeg = arguments[0]
+            sources = arguments[1]
         else:
             msg = f'Input is {type()} must be either the EEG data and Source data or the Simulation object.'
             raise AttributeError(msg)

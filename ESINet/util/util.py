@@ -6,6 +6,9 @@ from copy import deepcopy
 from .. import simulation
 from .. import net
 
+# from .. import Simulation
+# from .. import Net
+
 EPOCH_INSTANCES = (mne.epochs.EpochsArray, mne.Epochs, mne.EpochsArray, mne.epochs.EpochsFIF)
 EVOKED_INSTANCES = (mne.Evoked, mne.EvokedArray)
 RAW_INSTANCES = (mne.io.Raw, mne.io.RawArray)
@@ -91,11 +94,11 @@ def eeg_to_Epochs(data, pth_fwd, info=None):
         info = load_info(pth_fwd)
 
     epochs = mne.EpochsArray(data, info, verbose=0)
-    try:
+    
+    # Rereference to common average if its not the case
+    if int(epochs.info['custom_ref_applied']) != 0:
         epochs.set_eeg_reference('average', projection=True, verbose=0)
-    except:
-        pass
-
+    
     return epochs
 
 def rms(x):
@@ -264,10 +267,11 @@ def get_triangle_neighbors(tris_lr):
     return neighbors
 
 
-def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), data_span=(0, 0.5),
-    n_samples=int(1e4), optimizer=None, learning_rate=0.001, 
-        validation_split=0.1, n_epochs=100, metrics=None, device=None, delta=1, 
-        batch_size=128, loss=None, parallel=False, verbose=1):
+def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), 
+    data_span=(0, 0.5), n_samples=int(1e4), optimizer=None, learning_rate=0.001, 
+    validation_split=0.1, n_epochs=100, metrics=None, device=None, delta=1, 
+    batch_size=128, loss=None, false_positive_penalty=2, parallel=False, 
+    verbose=False):
     ''' The all-in-one convenience function for esinet.
     
     Parameters
@@ -304,6 +308,9 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), data_span=(0, 0.5
         during backpropagation.
     loss : tf.kers.losses
         The loss function.
+    false_positive_penalty : float
+        Defines weighting of false-positive predictions. Increase for conservative 
+        inverse solutions, decrease for liberal prediction.
     verbose : int/bool
         Controls verbosity of the program.
     
@@ -323,15 +330,16 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), data_span=(0, 0.5
     # Calculate signal to noise ratio of the data
     target_snr = calc_snr_range(data_obj, baseline_span=baseline_span, data_span=data_span)
     # Simulate sample M/EEG data
-    simulation = simulation.Simulation(fwd, data_obj.info, settings=dict(duration_of_trial=0, target_snr=target_snr), parallel=parallel, verbose=True)
-    simulation.simulate(n_samples=n_samples)
+    sim = simulation.Simulation(fwd, data_obj.info, settings=dict(duration_of_trial=0, target_snr=target_snr), parallel=parallel, verbose=True)
+    sim.simulate(n_samples=n_samples)
     # Train neural network
-    net = net.Net(fwd, verbose=verbose)
-    net.fit(simulation, optimizer=optimizer, learning_rate=learning_rate, 
+    neural_net = net.Net(fwd, verbose=verbose)
+    neural_net.fit(sim, optimizer=optimizer, learning_rate=learning_rate, 
         validation_split=validation_split, epochs=n_epochs, metrics=metrics,
-        device=device, delta=delta, batch_size=batch_size, loss=loss)
+        device=device, delta=delta, batch_size=batch_size, loss=loss,
+        false_positive_penalty=false_positive_penalty)
     # Predict sources
-    source_estimate = net.predict(data_obj)
+    source_estimate = neural_net.predict(data_obj)
 
     return source_estimate
 

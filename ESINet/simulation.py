@@ -2,9 +2,10 @@ from copy import deepcopy
 import numpy as np
 import random
 from joblib import Parallel, delayed
+from tensorflow.python.framework.tensor_util import SlowAppendComplex128ArrayToTensorProto
 from tqdm.notebook import tqdm
 import colorednoise as cn
-
+from time import time
 from . import util
 
 DEFAULT_SETTINGS = {
@@ -82,7 +83,6 @@ class Simulation:
 
     def simulate(self, n_samples=10000):
         ''' Simulate sources and EEG data'''
-     
         self.source_data = self.simulate_sources(n_samples)
         self.eeg_data = self.simulate_eeg()
 
@@ -281,6 +281,7 @@ class Simulation:
                 list of either mne.Epochs objects or list of raw EEG data 
                 (see argument <return_raw_data> to change output)
         '''
+        t_start = time()
         n_simulation_trials = 20
          
         # Desired Dim of sources: (samples x dipoles x time points)
@@ -300,15 +301,14 @@ class Simulation:
         n_samples, n_dipoles, n_timepoints = sources.shape
         n_elec = leadfield.shape[0]
 
+        start_project = time()
+        
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
-        eeg_clean = np.zeros((n_samples, n_elec, n_timepoints))
-        for i, sample in enumerate(sources):
-            for j, time_point in enumerate(sample.T):
-                eeg_clean[i, :, j] = np.matmul(leadfield, time_point)
+        eeg_clean = self.project_sources(sources)
 
-        # eeg_trials_noisy = np.zeros((n_samples, n_simulation_trials, n_elec, n_timepoints))
-
-        print(f'\nCreate EEG trials with noise...')
+        t_function_setup = time()
+        if self.verbose:
+            print(f'\nCreate EEG trials with noise...')
         if self.parallel:
             eeg_trials_noisy = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
                 (delayed(self.create_eeg_helper)(eeg_clean[sample], n_simulation_trials,
@@ -330,8 +330,9 @@ class Simulation:
             
         if eeg_trials_noisy.shape[2] != n_elec:
             eeg_trials_noisy = np.swapaxes(eeg_trials_noisy, 1, 2)
-
-        print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
+        
+        if self.verbose:
+            print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
         ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
         epochs = util.eeg_to_Epochs(ERP_samples_noisy, fwd_fixed, info=self.info)
 
@@ -354,18 +355,73 @@ class Simulation:
             The beta exponent of the 1/f**beta noise
 
         '''
-        if isinstance(target_snr, (tuple, list)):
-            target_snr = random.uniform(*target_snr)
-        if isinstance(beta, (tuple, list)):
-            beta = random.uniform(*beta)
+        target_snr = self.get_from_range(target_snr, dtype=float)
+        beta = self.get_from_range(beta, dtype=float)
         
         assert len(eeg_sample.shape) == 2, 'Length of eeg_sample must be 2 (time_points, electrodes)'
         
         eeg_sample = np.repeat(np.expand_dims(eeg_sample, 0), n_simulation_trials, axis=0)
         snr = target_snr / np.sqrt(n_simulation_trials)
-        noise_trial = self.add_noise(eeg_sample, snr, beta=beta)
+        
+        # Before: Add noise based on the GFP of all channels
+        # noise_trial = self.add_noise(eeg_sample, snr, beta=beta)
+        
+        # NEW: ADD noise for different types of channels, separately
+        # since they can have entirely different scales.
+        coil_types = [ch['coil_type'] for ch in self.info['chs']]
+        coil_types_set = list(set(coil_types))
+        coil_types_set = np.array([int(i) for i in coil_types_set])
+        
+        coil_type_assignments = np.array(
+            [np.where(coil_types_set==coil_type)[0][0] 
+                for coil_type in coil_types]
+        )
+        noise_trial = np.zeros(
+            (eeg_sample.shape[0], eeg_sample.shape[1], eeg_sample.shape[2])
+        )
+
+        for i, coil_type in enumerate(coil_types_set):
+            channel_indices = np.where(coil_type_assignments==i)[0]
+            eeg_sample_temp = eeg_sample[:, channel_indices, :]
+            noise_trial_subtype = self.add_noise(eeg_sample_temp, snr, beta=beta)
+            noise_trial[:, channel_indices, :] = noise_trial_subtype
+
+
+        
 
         return noise_trial
+    
+    def project_sources(self, sources):
+        ''' Project sources through the leadfield to obtain the EEG data.
+        Parameters
+        ----------
+        sources : numpy.ndarray
+            3D array of shape (samples, dipoles, time points)
+        
+        Return
+        ------
+
+        '''
+        fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
+        n_samples, n_dipoles, n_timepoints = sources.shape
+        n_elec = leadfield.shape[0]
+        eeg = np.zeros((n_samples, n_elec, n_timepoints))
+
+        # Swap axes to dipoles, samples, time_points
+        sources_tmp = np.swapaxes(sources, 0,1)
+        # Collapse last two dims into one
+        short_shape = (sources_tmp.shape[0], 
+            sources_tmp.shape[1]*sources_tmp.shape[2])
+        sources_tmp = sources_tmp.reshape(short_shape)
+        # Perform Matmul
+        result = np.matmul(leadfield, sources_tmp)
+        # Reshape result
+        result = result.reshape(result.shape[0], n_samples, n_timepoints)
+        # swap axes to correct order
+        result = np.swapaxes(result,0,1)
+        return result
+
+
     
     def add_noise(self, x, snr, beta=0):
         """ Add noise of given SNR to signal x.
