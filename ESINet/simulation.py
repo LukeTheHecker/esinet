@@ -27,7 +27,7 @@ class Simulation:
     settings : dict
         The Settings for the simulation. Keys:
 
-        n_sources : int/tuple/list
+        number_of_sources : int/tuple/list
             number of sources. Can be a single number or a list of two numbers 
             specifying a range.
         extents : int/float/tuple/list
@@ -35,13 +35,17 @@ class Simulation:
             numbers specifying a range.
         amplitudes : int/float/tuple/list
             the current of the source in nAm
-        shape : str
+        shapes : str
             How the amplitudes evolve over space. Can be 'gaussian' or 'flat' 
             (i.e. uniform) or 'both'.
-        durOfTrial : int/float
+        duration_of_trial : int/float
             specifies the duration of a trial.
         sample_frequency : int
             specifies the sample frequency of the data.
+        target_snr : float/tuple/list
+            The desired average SNR of the simulation(s)
+        beta : float/tuple/list
+            The desired frequency spectrum slope (1/f**beta) of the noise. 
     fwd : mne.Forward
         The mne-python Forward object that contains the forward model
     source_data : mne.sourceEstimate
