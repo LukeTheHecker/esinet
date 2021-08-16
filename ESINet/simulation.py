@@ -16,7 +16,7 @@ DEFAULT_SETTINGS = {
             'duration_of_trial': 0,
             'sample_frequency': 100,
             'target_snr': 4,
-            'beta': (0, 1.5),
+            'beta': (0, 3),
         }
 
 class Simulation:
@@ -204,17 +204,11 @@ class Simulation:
             signals = []
             for _ in range(number_of_sources):
                 signal = cn.powerlaw_psd_gaussian(self.get_from_range(self.settings['beta'], dtype=float), signal_length) 
-                signal += np.abs(np.min(signal))
-                signal /= np.max(signal)
+                # Old: have positive source values
+                # signal += np.abs(np.min(signal))
+                # signal /= np.max(signal)
+                signal /= np.max(np.abs(signal))
                 signals.append(signal)
-
-
-            # signal = np.zeros((signal_length))
-            # start = int(np.floor((signal_length - pulselen) / 2))
-            # end = int(np.ceil((signal_length - pulselen) / 2))
-            # signal[start:-end] = pulse
-            # signal += np.min(signal)
-            # signal /= np.max(signal)
             
             sample_frequency = self.settings['sample_frequency']
         else:  # else its a single instance
@@ -285,7 +279,7 @@ class Simulation:
                 list of either mne.Epochs objects or list of raw EEG data 
                 (see argument <return_raw_data> to change output)
         '''
-        t_start = time()
+
         n_simulation_trials = 20
          
         # Desired Dim of sources: (samples x dipoles x time points)
@@ -302,15 +296,13 @@ class Simulation:
 
         # Load some forward model objects
         fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
-        n_samples, n_dipoles, n_timepoints = sources.shape
+        n_samples, _, _ = sources.shape
         n_elec = leadfield.shape[0]
 
-        start_project = time()
         
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
         eeg_clean = self.project_sources(sources)
 
-        t_function_setup = time()
         if self.verbose:
             print(f'\nCreate EEG trials with noise...')
         if self.parallel:

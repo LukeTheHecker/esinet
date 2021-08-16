@@ -34,7 +34,7 @@ class Net(keras.Sequential):
     evaluate : evaluate the performance of the model
     '''
     
-    def __init__(self, fwd, n_layers=1, n_neurons=128, n_lstm_units=250, 
+    def __init__(self, fwd, n_layers=1, n_neurons=128, n_lstm_units=100, 
         activation_function='swish', n_jobs=-1, verbose=False):
 
         super().__init__()
@@ -213,7 +213,7 @@ class Net(keras.Sequential):
         else:
             x_scaled = np.squeeze(x_scaled)
             y_scaled = np.squeeze(y_scaled)
-        print(x_scaled.shape, y_scaled.shape)
+        print(x_scaled.shape, y_scaled.shape, y_scaled.max(), y_scaled.min())
 
         if device is None:
             try:
@@ -280,7 +280,7 @@ class Net(keras.Sequential):
             Scaled sources
         '''
         for sample in range(source.shape[0]):
-            source[sample] /= source[sample].std()
+            source[sample] /= np.max(np.abs(source[sample]))
 
         return source
             
@@ -342,11 +342,12 @@ class Net(keras.Sequential):
         if self.temporal:
             eeg_prep = np.swapaxes(eeg_prep, 1,2)
         predicted_sources = self.predict_sources(eeg_prep)       
-        
+        print(f'predicted_sources min: {predicted_sources.min()},predicted_sources max: {predicted_sources.max()}')
         
         # Rescale Predicitons
         # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
         predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
+        print(f'rescaled: predicted_sources min: {predicted_sources.min()},predicted_sources max: {predicted_sources.max()}')
 
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
         if predicted_sources.shape[-1] == 1:
@@ -507,8 +508,9 @@ class Net(keras.Sequential):
         self.add(layers.LSTM(self.n_lstm_units, return_sequences=True, 
             input_shape=(self.n_timepoints, self.n_channels)))
         self.add(layers.Flatten())
-        self.add(layers.Dense(int(self.n_timepoints*self.n_dipoles), activation=self.activation_function))
+        self.add(layers.Dense(int(self.n_timepoints*self.n_dipoles), activation='linear'))
         self.add(layers.Reshape((self.n_timepoints, self.n_dipoles)))
+        self.add(layers.Activation('linear'))
         
         self.build(input_shape=input_shape)
         
@@ -522,7 +524,7 @@ class Net(keras.Sequential):
                                 activation=self.activation_function))
         # Add output layer
         self.add(layers.Dense(self.n_dipoles, 
-            activation=keras.layers.ReLU()))
+            activation='linear'))
         
         # Build model with input layer
         self.build(input_shape=(None, self.n_channels))

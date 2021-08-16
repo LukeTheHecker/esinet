@@ -25,7 +25,7 @@ def weighted_mse_loss(weight=1, min_val=1e-3):
 
         error = K.square(true - pred)
 
-        error = K.switch(K.less(true, min_val), weight * error , error)
+        error = K.switch(K.less(K.abs(true), min_val), weight * error , error)
 
         return K.mean(error) 
 
@@ -59,7 +59,7 @@ def weighted_huber_loss(weight=1.0, delta=1.0, min_val=1e-3):
         error = delta * ( K.sqrt(1 + K.square(differences/delta)) -1 )
 
 
-        error = K.switch(K.less(true, min_val), weight * error , error)
+        error = K.switch(K.less(K.abs(true), min_val), weight * error , error)
 
         return K.mean(error)
 
@@ -88,7 +88,7 @@ def weighted_mae_loss(w=1, min_val=1e-3):
 
         error = K.abs(true - pred)
 
-        error = K.switch(K.less(true, min_val), w * error , error)
+        error = K.switch(K.less(K.abs(true), min_val), w * error , error)
 
         return K.mean(error) 
 
