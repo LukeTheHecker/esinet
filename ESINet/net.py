@@ -102,7 +102,8 @@ class Net(keras.Sequential):
 
     def fit(self, *args, optimizer=None, learning_rate=0.001, 
         validation_split=0.1, epochs=100, metrics=None, device=None, false_positive_penalty=2, 
-        delta=1., batch_size=128, loss=None, sample_weight=None, return_history=False):
+        delta=1., batch_size=128, loss=None, sample_weight=None, return_history=False,
+        dropout=0.2):
         ''' Train the neural network using training data (eeg) and labels (sources).
         
         Parameters
@@ -147,10 +148,12 @@ class Net(keras.Sequential):
 
         Return
         ------
+        self : esinet.Net
+            Method returns the object itself.
 
         '''
 
-
+        self.dropout = dropout
         eeg, sources = self._handle_data_input(args)
         self.subject = sources.subject if type(sources) == mne.SourceEstimate else sources[0].subject
 
@@ -178,22 +181,16 @@ class Net(keras.Sequential):
         # Extract data
         y = sources
         x = eeg
+
         # Prepare data
         # Scale sources
-        # y_scaled = np.stack([sample / np.max(sample) for sample in y])
         y_scaled = self.scale_source(y)
-
-        # Common average referencing for eeg
-        # x = np.stack([sample - np.mean(sample) for sample in x])
-        # Scale EEG
-        # x_scaled = np.stack([sample / np.max(np.abs(sample)) for sample in x])
-
         # Scale EEG
         x_scaled = self.scale_eeg(x)
 
         # Early stopping
         es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', \
-            mode='min', verbose=self.verbose, patience=25, restore_best_weights=True)
+            mode='min', verbose=self.verbose, patience=10, restore_best_weights=True)
             
         if optimizer is None:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
@@ -208,12 +205,13 @@ class Net(keras.Sequential):
         self.compile(optimizer, loss, metrics=metrics)
 
         if self.temporal:
+            # LSTM net expects dimensions to be: (samples, time, channels)
             x_scaled = np.swapaxes(x_scaled,1,2)
             y_scaled = np.swapaxes(y_scaled,1,2)
         else:
+            # Squeeze to remove empty time dimension
             x_scaled = np.squeeze(x_scaled)
             y_scaled = np.squeeze(y_scaled)
-        print(x_scaled.shape, y_scaled.shape, y_scaled.max(), y_scaled.min())
 
         if device is None:
             try:
@@ -347,7 +345,7 @@ class Net(keras.Sequential):
         # Rescale Predicitons
         # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
         predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
-        print(f'rescaled: predicted_sources min: {predicted_sources.min()},predicted_sources max: {predicted_sources.max()}')
+        print(f'rescaled: predicted_sources min: {predicted_sources_scaled.min()},predicted_sources max: {predicted_sources_scaled.max()}')
 
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
         if predicted_sources.shape[-1] == 1:
@@ -503,12 +501,15 @@ class Net(keras.Sequential):
         '''
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (self.n_timepoints, self.n_channels)
-        print(input_shape, self.n_dipoles)
         self.add(layers.InputLayer(input_shape=input_shape))
-        self.add(layers.LSTM(self.n_lstm_units, return_sequences=True, 
-            input_shape=(self.n_timepoints, self.n_channels)))
+        
+        for _ in range(self.n_layers):
+            self.add(layers.LSTM(self.n_lstm_units, return_sequences=True, 
+                input_shape=(self.n_timepoints, self.n_channels), 
+                dropout=self.dropout, activation=self.activation_function))
         self.add(layers.Flatten())
-        self.add(layers.Dense(int(self.n_timepoints*self.n_dipoles), activation='linear'))
+        self.add(layers.Dense(int(self.n_timepoints*self.n_dipoles), 
+            activation='linear'))
         self.add(layers.Reshape((self.n_timepoints, self.n_dipoles)))
         self.add(layers.Activation('linear'))
         
@@ -846,10 +847,8 @@ class BoostNet:
         eeg, sources = self._handle_data_input(args)
 
         y_hats = [subnet.predict(eeg, sources) for subnet in self.nets]
-        print(f'y_hats[0]: {y_hats[0]}')
         ensemble_predictions = np.stack([y_hat[0].data for y_hat in y_hats], axis=0).T
         ensemble_predictions = ensemble_predictions.reshape(ensemble_predictions.shape[0], np.prod((ensemble_predictions.shape[1], ensemble_predictions.shape[2])))
-        print(ensemble_predictions.shape)
         return ensemble_predictions, y_hats
 
     def _fit_nets(self, *args, **kwargs):

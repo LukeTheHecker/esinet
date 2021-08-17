@@ -185,16 +185,11 @@ class Simulation:
         elif self.settings['shapes'] == 'gaussian' or self.settings['shapes'] == 'flat':
             shapes = [self.settings['shapes']] * number_of_sources
         
-        # Get extent for each source
-        extents = [self.get_from_range(self.settings['extents'], dtype=float) for _ in range(number_of_sources)]
-
         # Get amplitude gain for each source (amplitudes come in nAm)
         amplitudes = [self.get_from_range(self.settings['amplitudes'], dtype=float) * 1e-9 for _ in range(number_of_sources)]
-
         
         src_centers = np.random.choice(np.arange(self.pos.shape[0]), \
             number_of_sources, replace=False)
-
 
         if self.settings['duration_of_trial'] > 0:
             signal_length = int(self.settings['sample_frequency']*self.settings['duration_of_trial'])
@@ -207,7 +202,9 @@ class Simulation:
                 # Old: have positive source values
                 # signal += np.abs(np.min(signal))
                 # signal /= np.max(signal)
+                # New:
                 signal /= np.max(np.abs(signal))
+
                 signals.append(signal)
             
             sample_frequency = self.settings['sample_frequency']
@@ -249,7 +246,6 @@ class Simulation:
         # source = np.squeeze(sourceOverTime * signal)
         # if len(source.shape) == 1:
         #     source = np.expand_dims(source, axis=1)
-        
         return source
 
     def simulate_eeg(self):
