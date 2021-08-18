@@ -2,9 +2,10 @@ import mne
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.keras import backend as K
+from keras.layers.core import Lambda
 from sklearn import linear_model
 import numpy as np
-from scipy.optimize import minimize_scalar
 from scipy.stats import pearsonr
 from copy import deepcopy
 from time import time
@@ -35,7 +36,7 @@ class Net(keras.Sequential):
     '''
     
     def __init__(self, fwd, n_layers=1, n_neurons=128, n_lstm_units=100, 
-        activation_function='swish', n_jobs=-1, verbose=False):
+        activation_function='swish', n_jobs=-1, verbose=True):
 
         super().__init__()
         self._embed_fwd(fwd)
@@ -101,7 +102,7 @@ class Net(keras.Sequential):
         return eeg, sources
 
     def fit(self, *args, optimizer=None, learning_rate=0.001, 
-        validation_split=0.1, epochs=100, metrics=None, device=None, false_positive_penalty=2, 
+        validation_split=0.1, epochs=50, metrics=None, device=None, false_positive_penalty=2, 
         delta=1., batch_size=128, loss=None, sample_weight=None, return_history=False,
         dropout=0.2):
         ''' Train the neural network using training data (eeg) and labels (sources).
@@ -190,7 +191,7 @@ class Net(keras.Sequential):
 
         # Early stopping
         es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', \
-            mode='min', verbose=self.verbose, patience=10, restore_best_weights=True)
+            mode='min', verbose=self.verbose, patience=7, restore_best_weights=True)
             
         if optimizer is None:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
@@ -200,7 +201,7 @@ class Net(keras.Sequential):
         elif type(loss) == list:
             loss = loss[0](*loss[1])
         if metrics is None:
-            metrics = [self.default_loss(weight=false_positive_penalty, delta=delta), 'mean_squared_error']
+            metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
 
         self.compile(optimizer, loss, metrics=metrics)
 
@@ -340,12 +341,10 @@ class Net(keras.Sequential):
         if self.temporal:
             eeg_prep = np.swapaxes(eeg_prep, 1,2)
         predicted_sources = self.predict_sources(eeg_prep)       
-        print(f'predicted_sources min: {predicted_sources.min()},predicted_sources max: {predicted_sources.max()}')
         
         # Rescale Predicitons
         # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
         predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
-        print(f'rescaled: predicted_sources min: {predicted_sources_scaled.min()},predicted_sources max: {predicted_sources_scaled.max()}')
 
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
         if predicted_sources.shape[-1] == 1:
@@ -370,7 +369,6 @@ class Net(keras.Sequential):
         '''
         assert len(eeg.shape)==3, 'eeg must be a 3D numpy array of dim (samples, channels, time)'
         if not self.temporal:
-            print(eeg.shape)
             # Predict sources all at once
             n_samples, n_elec, n_time = eeg.shape
             ## swap electrode and time axis
@@ -388,13 +386,11 @@ class Net(keras.Sequential):
             predicted_sources = predicted_sources.reshape(n_samples, n_time, self.n_dipoles)
             predicted_sources = np.swapaxes(predicted_sources, 1,2)
         else:
-            print('predicting temporal in 1 go')
             try:
                 predicted_sources = super(Net, self).predict(eeg)
             except:
                 predicted_sources = super().predict(eeg)
             predicted_sources = np.swapaxes(predicted_sources,1,2)
-        print(predicted_sources.shape)
         return predicted_sources
 
     def _scale_p_wrap(self, y_est, x_true):
@@ -488,7 +484,8 @@ class Net(keras.Sequential):
         (2) A LSTM network for spatio-temporal prediction
         '''
         if self.temporal:
-            self._build_temporal_model()
+            # self._build_temporal_model()
+            self._build_temporal_model_v2()
         else:
             self._build_perceptron_model()
         
@@ -504,9 +501,9 @@ class Net(keras.Sequential):
         self.add(layers.InputLayer(input_shape=input_shape))
         
         for _ in range(self.n_layers):
-            self.add(layers.LSTM(self.n_lstm_units, return_sequences=True, 
+            self.add(layers.Bidirectional(layers.LSTM(self.n_lstm_units, return_sequences=True, 
                 input_shape=(self.n_timepoints, self.n_channels), 
-                dropout=self.dropout, activation=self.activation_function))
+                dropout=self.dropout, activation=self.activation_function)))
         self.add(layers.Flatten())
         self.add(layers.Dense(int(self.n_timepoints*self.n_dipoles), 
             activation='linear'))
@@ -515,6 +512,26 @@ class Net(keras.Sequential):
         
         self.build(input_shape=input_shape)
         
+    def _build_temporal_model_v2(self):
+        ''' Build the temporal artificial neural network model using LSTM layers.
+        '''
+
+        tf.keras.backend.set_image_data_format('channels_last')
+        input_shape = (None, self.n_channels)
+        self.add(layers.InputLayer(input_shape=input_shape))
+        
+        # LSTM layers
+        for _ in range(self.n_layers):
+            self.add(layers.LSTM(self.n_lstm_units, return_sequences=True, 
+                input_shape=input_shape, 
+                dropout=self.dropout, activation=self.activation_function))
+
+        # For-each layer:
+        self.add(layers.TimeDistributed(
+            layers.Dense(self.n_dipoles, activation='linear'))
+        )
+
+        self.build(input_shape=input_shape)
 
     def _build_perceptron_model(self):
         ''' Build the artificial neural network model using Dense layers.
@@ -529,6 +546,9 @@ class Net(keras.Sequential):
         
         # Build model with input layer
         self.build(input_shape=(None, self.n_channels))
+
+    
+
 
     def _check_model(self, eeg):
         ''' Check whether the current forward model has the same 
@@ -860,7 +880,6 @@ class BoostNet:
         for net in self.nets:
             sample_idc = np.random.choice(np.arange(n_samples), 
                 int(0.8*n_samples), replace=True)
-            print(f'new idc: {sample_idc}')
             eeg_bootstrap = eeg.copy()[sample_idc]
             sources_bootstrap = sources.copy()
             sources_bootstrap.data = sources_bootstrap.data[:, sample_idc]

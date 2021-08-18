@@ -1,37 +1,41 @@
 import tensorflow as tf
 from tensorflow.keras import backend as K
 
-def weighted_mse_loss(weight=1, min_val=1e-3):
+def weighted_mse_loss(weight=1, min_val=1e-3, scale=True):
     ''' Weighted mean squared error (MSE) loss. A loss function that can be 
     used with tensorflow/keras which calculates the MSE with a weighting of 
     false positive predicitons. Set weight high for more conservative 
     predictions.
-
     Parameters
     ----------
     weight : float
         Weighting factor which penalizes false positives.
     min_val : float
         The threshold below which the target is set to zero.
-
     Return
     ------
     loss : loss function
-
     '''
     weight = tf.cast(weight, tf.float32)
     
     def loss(true, pred):
 
+        if scale:
+            # Scale to max(abs(x)) == 1
+            pred = scale_mat(pred)
+            true = scale_mat(true)
+        
+        # Calc squared error
         error = K.square(true - pred)
-
+        
+        # False-positive weighting
         error = K.switch(K.less(K.abs(true), min_val), weight * error , error)
 
         return K.mean(error) 
 
     return loss
 
-def weighted_huber_loss(weight=1.0, delta=1.0, min_val=1e-3):
+def weighted_huber_loss(weight=1.0, delta=1.0, min_val=1e-3, scale=True):
     ''' Weighted Huber loss. A loss function that can be 
     used with tensorflow/keras which calculates the Huber loss with 
     a weighting of false positive predicitons. Set weight high 
@@ -50,34 +54,40 @@ def weighted_huber_loss(weight=1.0, delta=1.0, min_val=1e-3):
     ------
     loss : loss function
     '''
+
     weight = tf.cast(weight, tf.float32)
     delta = K.clip(tf.cast(delta, tf.float32), K.epsilon(), 10e2)
 
     def loss(true, pred):
-        differences = true-pred
 
+        if scale:
+            # Scale to max(abs(x)) == 1
+            pred = scale_mat(pred)
+            true = scale_mat(true)
+        # Calc error
+        differences = true-pred
+        
+        # Huber Loss
         error = delta * ( K.sqrt(1 + K.square(differences/delta)) -1 )
 
-
+        # False-positive weighting
         error = K.switch(K.less(K.abs(true), min_val), weight * error , error)
 
         return K.mean(error)
 
     return loss
 
-def weighted_mae_loss(w=1, min_val=1e-3):
+def weighted_mae_loss(w=1, min_val=1e-3, scale=True):
     ''' Weighted mean absolute error (MAE) loss. A loss function that can be 
     used with tensorflow/keras which calculates the MAE with a weighting of 
     false positive predicitons. Set weight high for more conservative 
     predictions.
-
     Parameters
     ----------
     weight : float
         Weighting factor which penalizes false positives.
     min_val : float
         The threshold below which the target is set to zero.
-
     Return
     ------
     loss : loss function
@@ -85,14 +95,27 @@ def weighted_mae_loss(w=1, min_val=1e-3):
     w = tf.cast(w, tf.float32)
     
     def loss(true, pred):
-
+        
+        if scale:
+            # Scale to max(abs(x)) == 1
+            pred = scale_mat(pred)
+            true = scale_mat(true)
+        
+        # MAE Loss
         error = K.abs(true - pred)
-
+        
+        # False-positive weighting
         error = K.switch(K.less(K.abs(true), min_val), w * error , error)
 
         return K.mean(error) 
 
     return loss
+
+def scale_mat(mat):
+    ''' Scale matrix such that each row has max value of 1'''
+    max_vals = tf.expand_dims(K.max(K.abs(mat), axis=-1), axis=-1)
+    max_vals = K.clip(max_vals, K.epsilon(), 999999999999)
+    return mat / max_vals
 
 
 def custom_loss(leadfield, fwd_scaler):

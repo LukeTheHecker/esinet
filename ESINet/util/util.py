@@ -245,7 +245,7 @@ def get_triangle_neighbors(tris_lr):
             for old_idx, new_idx in zip(old_indices, new_indices):
                 tris_lr[hem][tris_lr[hem] == old_idx] = new_idx
 
-        print('indices were weird - fixed them.')
+        # print('indices were weird - fixed them.')
     numberOfDipoles = len(np.unique(tris_lr[0])) + len(np.unique(tris_lr[1]))
     neighbors = [list() for _ in range(numberOfDipoles)]
     # correct right-hemisphere triangles
@@ -263,7 +263,6 @@ def get_triangle_neighbors(tris_lr):
                 neighbors[idx] = list(filter(lambda a: a != idx, neighbors[idx]))
             # Remove duplicates
             neighbors[idx] = list(np.unique(neighbors[idx]))
-            # print(f'idx {idx} found in triangles: {neighbors[idx]}') 
     return neighbors
 
 
@@ -364,3 +363,21 @@ def get_eeg_from_source(stc, fwd, info, tmin=-0.2):
     eeg_hat = np.matmul(leadfield, stc.data)
 
     return mne.EvokedArray(eeg_hat, info, tmin=tmin)
+
+def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, ):
+    ''' Quickly compute inverse solution using MNE methods
+    '''
+    method = "eLORETA"
+    lambda2 = 1. / snr ** 2
+    
+    evoked = epochs.average()
+    noise_cov = mne.compute_covariance(epochs, tmax=tmax, 
+        method=['shrunk', 'empirical'], rank=None, verbose=False)
+
+    inverse_operator = mne.minimum_norm.make_inverse_operator(
+        evoked.info, fwd, noise_cov, loose='auto', depth=None, fixed=True, 
+        verbose=False)
+        
+    stc_elor, residual = mne.minimum_norm.apply_inverse(epochs.average(), inverse_operator, lambda2,
+                                method=method, return_residual=True, verbose=False)
+    return stc_elor

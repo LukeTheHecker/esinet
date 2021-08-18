@@ -1,16 +1,16 @@
 from copy import deepcopy
 import numpy as np
+import pickle as pkl
 import random
 from joblib import Parallel, delayed
-from tensorflow.python.framework.tensor_util import SlowAppendComplex128ArrayToTensorProto
 from tqdm.notebook import tqdm
 import colorednoise as cn
 from time import time
 from . import util
 
 DEFAULT_SETTINGS = {
-            'number_of_sources': (1, 5),
-            'extents': (25, 35),
+            'number_of_sources': (1, 20),
+            'extents': (1, 50),
             'amplitudes': (1, 10),
             'shapes': 'both',
             'duration_of_trial': 0,
@@ -96,37 +96,39 @@ class Simulation:
         pass
     
     def simulate_sources(self, n_samples):
-        if self.parallel:
-            if self.verbose:
+        if self.verbose:
                 print(f'Simulate Source')
+        if self.parallel:
             source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
                 (delayed(self.simulate_source)() 
-                for i in tqdm(range(n_samples))))
+                for _ in range(n_samples)))
         else:
             source_data = np.stack([self.simulate_source() 
                 for _ in tqdm(range(n_samples))], axis=0)
         
         # Convert to mne.SourceEstimate
+        if self.verbose:
+            print(f'Converting Source Data to mne.SourceEstimate object')
         if self.settings['duration_of_trial'] == 0:
-            if self.verbose:
-                print(f'Converting Source Data to mne.SourceEstimate object')
             sources = util.source_to_sourceEstimate(source_data, self.fwd, 
                 sfreq=self.settings['sample_frequency'], subject=self.subject) 
         else:
-            if self.parallel:
-                sources = Parallel(n_jobs=self.n_jobs, backend='loky')(
-                    delayed(util.source_to_sourceEstimate)
-                    (source, self.fwd, sfreq=self.settings['sample_frequency'], 
-                    subject=self.subject) 
-                    for source in tqdm(source_data))
-            else:
-                sources = [util.source_to_sourceEstimate(source, 
-                    self.fwd, sfreq=self.settings['sample_frequency'], 
-                    subject=self.subject) 
-                    for source in tqdm(source_data)]
+            sources = self.sources_to_sourceEstimates(source_data)
 
         return sources
-    
+
+    def sources_to_sourceEstimates(self, source_data):
+        template = util.source_to_sourceEstimate(source_data[0], 
+                    self.fwd, sfreq=self.settings['sample_frequency'], 
+                    subject=self.subject)
+        sources = []
+        for source in tqdm(source_data):
+            tmp = deepcopy(template)
+            tmp.data = source
+            sources.append(tmp)
+        return sources
+
+
     def simulate_source(self):
         ''' Returns a vector containing the dipole currents. Requires only a 
         dipole position list and the simulation settings.
@@ -297,6 +299,8 @@ class Simulation:
 
         
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
+        if self.verbose:
+            print(f'\nProject sources to EEG...')
         eeg_clean = self.project_sources(sources)
 
         if self.verbose:
@@ -304,7 +308,8 @@ class Simulation:
         if self.parallel:
             eeg_trials_noisy = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
                 (delayed(self.create_eeg_helper)(eeg_clean[sample], n_simulation_trials,
-                self.settings['target_snr'], self.settings['beta']) for sample in tqdm(range(n_samples))), axis=0)
+                self.settings['target_snr'], self.settings['beta']) 
+                for sample in tqdm(range(n_samples))), axis=0)
         else:
             eeg_trials_noisy = np.stack(
                 [self.create_eeg_helper(eeg_clean[sample], n_simulation_trials, 
@@ -448,11 +453,18 @@ class Simulation:
         ''' Check if settings are complete and insert missing 
             entries if there are any.
         '''
-
+        # Check for wrong keys:
+        for key in self.settings.keys():
+            if not key in DEFAULT_SETTINGS.keys():
+                msg = f'key {key} is not part of allowed settings. See DEFAULT_SETTINGS for reference: {DEFAULT_SETTINGS}'
+                raise AttributeError(msg)
+        
+        # Check for missing keys and replace them from the DEFAULT_SETTINGS
         for key in DEFAULT_SETTINGS.keys():
             # Check if setting exists and is not None
             if not (key in self.settings.keys() and self.settings[key] is not None):
                 self.settings[key] = DEFAULT_SETTINGS[key]
+        
         if self.settings['duration_of_trial'] == 0:
             self.temporal = False
         else:
@@ -503,3 +515,20 @@ class Simulation:
         elif isinstance(val, (int, float)):
             out = val
         return out
+    
+    def save(self, file_name):
+        ''' Store the simulation object.
+        Parameters
+        ----------
+        file_name : str
+            Filename or full path to store the object to.
+
+        Example
+        -------
+        sim = Simulation().simulate()
+        sim.save('C/Users/User/Desktop/simulation.pkl')
+        '''
+
+        with open(file_name, 'wb') as f:
+            pkl.dump(self, f)
+
