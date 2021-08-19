@@ -2,10 +2,12 @@
 *.pkl
 *.stc
 *__pycache__
-*test_temporal.ipynb
-*pypi_package_reminder.md
-# test_*
+
 dev
 .vscode
-# tests
+
 env
+build
+.pytest_cache
+dist
+esinet.egg-info
