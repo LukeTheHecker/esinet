@@ -53,7 +53,7 @@ settings = dict(duration_of_trial=0.2)
 sim = Simulation(fwd, info, settings=settings)
 sim.simulate(n_samples=10000)
 
-# Train neural network on the simulated data
+# Train neural network (LSTM) on the simulated data
 net = Net(fwd)
 ann.fit(sim)
 
@@ -95,3 +95,5 @@ ISSN={1662-453X}
 # Troubleshooting
 * Having problems with the installation? Check the [package requirements](requirements.txt)
 
+# Notes on current version
+* This version 0.1.0 is fully compatible with the mne-python package. This meant that I had to change the whole API to match the mne-python API. Please have a look at the new tutorials in order to get familiar with the new code structure or revert back to an earlier version. Check the changelog for a version list.
