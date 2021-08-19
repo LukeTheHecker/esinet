@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0 19.08.2021
+* Changed API from functional to object-oriented
+* New Tutorials
+* Models can now train on either single time instances of EEG data or on temporal data (LSTM Model)
+* Optimized simulation through more intelligent matrix multiplications
+* Im am sorry if this update broke your code. If you experience issues please either follow the tutorials on the new API or revert back to an older version.
+
 ## 0.0.12 15.06.2021
 * Made tutorial notebook clearer and minor changes
 

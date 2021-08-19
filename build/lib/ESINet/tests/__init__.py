@@ -1,2 +1,1 @@
-from .unit_tests import *
-from .tests import *
+from .test_simulation import *

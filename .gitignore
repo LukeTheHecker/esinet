@@ -4,8 +4,8 @@
 *__pycache__
 *test_temporal.ipynb
 *pypi_package_reminder.md
-test_*
+# test_*
 dev
 .vscode
-tests
+# tests
 env

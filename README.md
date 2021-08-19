@@ -3,17 +3,17 @@
 **esinet** let's you solve the EEG inverse problem using ANNs. It currently supports two main architectures:
 ## Model 1
 
-A fully connected neural network which is trained on single time instances of M/EEG data.
+A fully connected neural network which is trained on single time instances of M/EEG data. This model was described in our [paper](https://www.frontiersin.org/articles/10.3389/fnins.2021.569918/full).
 
 ## Model 2
 
-A temporal long-short-term memory (LSTM) model which is trained on sequences.
+A temporal long-short-term memory (LSTM) model which is trained on sequences of EEG data. A similar model only with different output specifications has been presented in a work bei [Cui et al., 2019](https://ieeexplore.ieee.org/abstract/document/8766914?casa_token=AFbwwLcRySAAAAAA:Gx9_D5QajW1parwhStwtxPdLVVIT8WTbdzTg8bSZ1LT6mTuOTxYyLxd84Kc3k9n2fpqkL8Dl).
 
 ---
 
-The package is based on our publication: [ConvDip: A Convolutional Neural Network for Better EEG Source Imaging](https://www.frontiersin.org/articles/10.3389/fnins.2021.569918/full)
+<!-- ![esinet](/assets/esinet.png) -->
+<img src="assets/esinet.png" alt="esinet" width="500"/>
 
-![esinet](/assets/esinet.png)
 Neural network design was created [here](http://alexlenail.me/NN-SVG/index.html)
 
 <br/><br/>
