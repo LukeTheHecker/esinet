@@ -2,19 +2,23 @@ import mne
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.keras.layers import (LSTM, Dense, Flatten, Bidirectional, 
+    TimeDistributed, InputLayer, Activation, Reshape, concatenate, Dropout)
 from tensorflow.keras import backend as K
 from keras.layers.core import Lambda
+import datetime
 # from sklearn import linear_model
 import numpy as np
 from scipy.stats import pearsonr
 from copy import deepcopy
 from time import time
+
+from tensorflow.python.keras.backend import dropout
 from . import util
 from . import losses
 
-class Net(keras.Sequential):
+class Net:
     ''' The neural network class that creates and trains the model. 
-    Inherits the keras.Sequential class
     
     Attributes
     ----------
@@ -26,7 +30,16 @@ class Net(keras.Sequential):
         Number of neurons per hidden layer.
     activation_function : str
         The activation function used for each fully connected layer.
-
+    n_jobs : int
+        Number of jobs/ cores to use during parallel processing
+    model : str
+        Determines the neural network architecture.
+            'auto' : automated selection for fully connected if training data 
+                contains single time instances (non-temporal data)
+            'single' : The single time instance model that does not learn 
+                temporal relations.
+            'temporal' : The LSTM model which estimates multiples inverse 
+                solutions in one go.
     Methods
     -------
     fit : trains the neural network with the EEG and source data
@@ -35,20 +48,23 @@ class Net(keras.Sequential):
     evaluate : evaluate the performance of the model
     '''
     
-    def __init__(self, fwd, n_layers=1, n_neurons=128, n_lstm_units=100, 
-        activation_function='swish', n_jobs=-1, verbose=True):
+    def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=1, 
+        n_dense_units=100, n_lstm_units=100, activation_function='swish', 
+        n_jobs=-1, model_type='auto', verbose=True):
 
-        super().__init__()
         self._embed_fwd(fwd)
         
-        self.n_layers = n_layers
-        self.n_neurons = n_neurons
+        self.n_dense_layers = n_dense_layers
+        self.n_lstm_layers = n_lstm_layers
+        self.n_dense_units = n_dense_units
         self.n_lstm_units = n_lstm_units
         self.activation_function = activation_function
         # self.default_loss = tf.keras.losses.Huber(delta=delta)
         self.default_loss = losses.weighted_huber_loss
         # self.parallel = parallel
         self.n_jobs = n_jobs
+        self.model_type = model_type
+        self.compiled = False
         self.verbose = verbose
 
     def _embed_fwd(self, fwd):
@@ -102,9 +118,10 @@ class Net(keras.Sequential):
         return eeg, sources
 
     def fit(self, *args, optimizer=None, learning_rate=0.001, 
-        validation_split=0.1, epochs=50, metrics=None, device=None, false_positive_penalty=2, 
-        delta=1., batch_size=128, loss=None, sample_weight=None, return_history=False,
-        dropout=0.2):
+        validation_split=0.1, epochs=50, metrics=None, device=None, 
+        false_positive_penalty=2, delta=1., batch_size=128, loss=None, 
+        sample_weight=None, return_history=False, dropout=0.2, patience=7, 
+        tensorboard=False):
         ''' Train the neural network using training data (eeg) and labels (sources).
         
         Parameters
@@ -156,12 +173,14 @@ class Net(keras.Sequential):
 
         self.dropout = dropout
         eeg, sources = self._handle_data_input(args)
-        self.subject = sources.subject if type(sources) == mne.SourceEstimate else sources[0].subject
-
-        if type(sources) == list:
-            self.temporal = True
-        else:
+        self.subject = sources.subject if type(sources) == mne.SourceEstimate \
+            else sources[0].subject
+        # Decide gross model architecture
+        if self.model_type == 'single' or (self.model_type=='auto' and type(sources) != list):
             self.temporal = False
+        else:
+            self.temporal = True
+        
         # Ensure that the forward model has the same 
         # channels as the eeg object
         self._check_model(eeg)
@@ -191,8 +210,14 @@ class Net(keras.Sequential):
 
         # Early stopping
         es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', \
-            mode='min', verbose=self.verbose, patience=7, restore_best_weights=True)
-            
+            mode='min', verbose=self.verbose, patience=patience, restore_best_weights=True)
+        if tensorboard:
+            log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            tensorboard_callback = tf.keras.callbacks.TensorBoard(
+                log_dir=log_dir, histogram_freq=1)
+            callbacks = [es, tensorboard_callback]
+        else:
+            callbacks = [es]
         if optimizer is None:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         if loss is None:
@@ -202,8 +227,11 @@ class Net(keras.Sequential):
             loss = loss[0](*loss[1])
         if metrics is None:
             metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
-
-        self.compile(optimizer, loss, metrics=metrics)
+        
+        # Compile if it wasnt compiled before
+        if not self.compiled:
+            self.model.compile(optimizer, loss, metrics=metrics)
+            self.compiled = True
 
         if self.temporal:
             # LSTM net expects dimensions to be: (samples, time, channels)
@@ -215,26 +243,19 @@ class Net(keras.Sequential):
             y_scaled = np.squeeze(y_scaled)
 
         if device is None:
-            try:
-                history = super(Net, self).fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
-                    validation_split=validation_split, verbose=self.verbose, callbacks=[es],
-                    sample_weight=sample_weight)
-            except:
-                history = super().fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
-                    validation_split=validation_split, verbose=self.verbose, callbacks=[es],
-                    sample_weight=sample_weight)
+            history = self.model.fit(x_scaled, y_scaled, 
+                epochs=epochs, batch_size=batch_size, shuffle=True, 
+                validation_split=validation_split, verbose=self.verbose, 
+                callbacks=callbacks, sample_weight=sample_weight)
         else:
             with tf.device(device):
-                try:
-                    history = super(Net, self).fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
-                        validation_split=validation_split, verbose = self.verbose, callbacks=[es],
-                        sample_weight=sample_weight)
-                except:
-                    history = super().fit(x_scaled, y_scaled, epochs=epochs, batch_size=batch_size, shuffle=False, \
-                        validation_split=validation_split, verbose = self.verbose, callbacks=[es],
-                        sample_weight=sample_weight)
+                history = self.model.fit(x_scaled, y_scaled, 
+                    epochs=epochs, batch_size=batch_size, shuffle=True, 
+                    validation_split=validation_split, verbose=self.verbose,
+                    callbacks=callbacks, sample_weight=sample_weight)
+                
         if return_history:
-            self, history
+            return self, history
         else:
             return self
 
@@ -257,10 +278,11 @@ class Net(keras.Sequential):
         for sample in range(eeg.shape[0]):
             for time in range(eeg.shape[2]):
                 eeg[sample, :, time] -= np.mean(eeg[sample, :, time])
+                eeg[sample, :, time] /= eeg[sample, :, time].std()
         
         # Normalize
-        for sample in range(eeg.shape[0]):
-            eeg[sample] /= eeg[sample].std()
+        # for sample in range(eeg.shape[0]):
+        #     eeg[sample] /= eeg[sample].std()
 
         return eeg
             
@@ -279,7 +301,8 @@ class Net(keras.Sequential):
             Scaled sources
         '''
         for sample in range(source.shape[0]):
-            source[sample] /= np.max(np.abs(source[sample]))
+            for time in range(source.shape[2]):
+                source[sample, :, time] /= np.max(np.abs(source[sample, :, time]))
 
         return source
             
@@ -307,8 +330,6 @@ class Net(keras.Sequential):
         
         eeg, _ = self._handle_data_input(args)
         
-        
-
         if isinstance(eeg, util.EVOKED_INSTANCES):
             # Ensure there are no extra channels in our EEG
             eeg = eeg.pick_channels(self.fwd.ch_names)    
@@ -377,20 +398,18 @@ class Net(keras.Sequential):
             new_shape = (n_samples*n_time, n_elec)
             eeg_tmp = eeg_tmp.reshape(new_shape)
             ## predict
-            try:
-                predicted_sources = super(Net, self).predict(eeg_tmp)
-            except:
-                predicted_sources = super().predict(eeg_tmp)
-
+            
+            predicted_sources = self.model.predict(eeg_tmp)
+            
             ## Get to old shape
             predicted_sources = predicted_sources.reshape(n_samples, n_time, self.n_dipoles)
             predicted_sources = np.swapaxes(predicted_sources, 1,2)
         else:
-            try:
-                predicted_sources = super(Net, self).predict(eeg)
-            except:
-                predicted_sources = super().predict(eeg)
+            
+            predicted_sources = self.model.predict(eeg)
+            
             predicted_sources = np.swapaxes(predicted_sources,1,2)
+
         return predicted_sources
 
     def _scale_p_wrap(self, y_est, x_true):
@@ -469,7 +488,7 @@ class Net(keras.Sequential):
 
         eeg, sources = self._handle_data_input(args)
         
-        y_hat = self.predict(eeg).data
+        y_hat = self.mode.predict(eeg).data
         y = sources.data
         mean_squared_errors = np.mean((y_hat - y)**2, axis=0)
 
@@ -485,67 +504,141 @@ class Net(keras.Sequential):
         '''
         if self.temporal:
             # self._build_temporal_model()
-            self._build_temporal_model_v2()
+            # self._build_temporal_model_v2()
+            self._build_temporal_model_v3()
         else:
             self._build_perceptron_model()
         
 
         if self.verbose:
-            self.summary()
+            self.model.summary()
     
     def _build_temporal_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
+        self.model = keras.Sequential()
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (self.n_timepoints, self.n_channels)
-        self.add(layers.InputLayer(input_shape=input_shape))
+        self.model.add(InputLayer(input_shape=input_shape))
         
-        for _ in range(self.n_layers):
-            self.add(layers.Bidirectional(layers.LSTM(self.n_lstm_units, return_sequences=True, 
+        for _ in range(self.n_lstm_layers):
+            self.model.add(Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
                 input_shape=(self.n_timepoints, self.n_channels), 
                 dropout=self.dropout, activation=self.activation_function)))
-        self.add(layers.Flatten())
-        self.add(layers.Dense(int(self.n_timepoints*self.n_dipoles), 
+        self.model.add(Flatten())
+
+        self.model.add(Dense(int(self.n_timepoints*self.n_dipoles), 
             activation='linear'))
-        self.add(layers.Reshape((self.n_timepoints, self.n_dipoles)))
-        self.add(layers.Activation('linear'))
+
+        self.model.add(Dense(int(self.n_timepoints*self.n_dipoles), 
+            activation='linear'))
+        self.model.add(Reshape((self.n_timepoints, self.n_dipoles)))
+        self.model.add(Activation('linear'))
         
-        self.build(input_shape=input_shape)
+        self.model.build(input_shape=input_shape)
         
     def _build_temporal_model_v2(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
-
+        self.model = keras.Sequential()
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (None, self.n_channels)
-        self.add(layers.InputLayer(input_shape=input_shape))
+        self.model.add(InputLayer(input_shape=input_shape))
         
         # LSTM layers
-        for _ in range(self.n_layers):
-            self.add(layers.LSTM(self.n_lstm_units, return_sequences=True, 
-                input_shape=input_shape, 
-                dropout=self.dropout, activation=self.activation_function))
+        for _ in range(self.n_lstm_layers):
+            self.model.add(Bidirectional(LSTM(self.n_lstm_units, 
+                return_sequences=True, input_shape=input_shape, 
+                dropout=self.dropout, activation=self.activation_function)))
 
-        # For-each layer:
-        self.add(layers.TimeDistributed(
-            layers.Dense(self.n_dipoles, activation='linear'))
+        # Hidden Dense layer(s):
+        for _ in range(self.n_dense_layers-1):
+            self.model.add(Dense(self.n_dense_units, 
+                activation=self.activation_function))
+
+        # Final For-each layer:
+        self.model.add(TimeDistributed(
+            Dense(self.n_dipoles, activation='linear'))
         )
 
-        self.build(input_shape=input_shape)
+        self.model.build(input_shape=input_shape)
+
+
+    def _build_temporal_model_v3(self):
+        ''' A mixed dense / LSTM network, inspired by:
+        "Deep Burst Denoising" (Godarg et al., 2018)
+        '''
+        inputs = keras.Input(shape=(None, self.n_channels), name='Input')
+        # SINGLE TIME FRAME PATH
+        fc1 = TimeDistributed(Dense(self.n_dense_units, 
+            activation=self.activation_function), 
+            name='FC1')(inputs)
+        fc1 = Dropout(self.dropout, name='Dropout1')(fc1)
+
+        fc2 = TimeDistributed(Dense(self.n_dipoles,
+            activation=self.activation_function), 
+            name='FC2')(fc1)
+        fc2 = Dropout(self.dropout, name='Dropout2')(fc2)
+
+        model_s = keras.Model(inputs=inputs, outputs=fc2, 
+            name='single_time_ frame_model')
+
+        # MULTI TIME FRAME PATH
+        lstm1 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
+            input_shape=(None, self.n_dense_units), dropout=self.dropout, 
+            activation=self.activation_function), name='LSTM1')(fc1)
+
+        concat = concatenate([lstm1, fc2], name='Concat')
+
+        lstm2 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
+            input_shape=(None, self.n_dense_units), dropout=self.dropout, 
+            activation=self.activation_function), name='LSTM2')(concat)
+
+        output = TimeDistributed(Dense(self.n_dipoles), name='FC_Out')(lstm2)
+        model_m = keras.Model(inputs=inputs, outputs=output, name='multi_time_frame_model')
+
+        self.model = model_m
+        
+        # model_m.summary()
+        # model_m.compile(loss='mse')
+        # model_m.fit(X, y)
+
+    def _freeze_lstm(self):
+        for i, layer in enumerate(self.model.layers):
+            if 'LSTM' in layer.name:
+                print(f'freezing {layer.name}')
+
+                self.model.layers[i].trainable = False
+    
+    def _unfreeze_lstm(self):
+        for i, layer in enumerate(self.model.layers):
+            if 'LSTM' in layer.name:
+                self.model.layers[i].trainable = True
+    
+    def _freeze_fc(self):
+        for i, layer in enumerate(self.model.layers):
+            if 'FC' in layer.name and not 'Out' in layer.name:
+                print(f'freezing {layer.name}')
+                self.model.layers[i].trainable = False
+
+    def _unfreeze_fc(self):
+        for i, layer in enumerate(self.model.layers):
+            if 'FC' in layer.name:
+                self.model.layers[i].trainable = True
 
     def _build_perceptron_model(self):
         ''' Build the artificial neural network model using Dense layers.
         '''
+        self.model = keras.Sequential()
         # Add hidden layers
-        for i in range(self.n_layers):
-            self.add(layers.Dense(units=self.n_neurons,
+        for _ in range(self.n_dense_layers):
+            self.model.add(Dense(units=self.n_dense_units,
                                 activation=self.activation_function))
         # Add output layer
-        self.add(layers.Dense(self.n_dipoles, 
-            activation='linear'))
+        self.model.add(Dense(self.n_dipoles, activation='linear'))
         
         # Build model with input layer
-        self.build(input_shape=(None, self.n_channels))
+        self.model.build(input_shape=(None, self.n_channels))
 
     
 
@@ -561,7 +654,7 @@ class Net(keras.Sequential):
 
         '''
         # Dont do anything if model is already built.
-        if self.built:
+        if self.compiled:
             return
         
         # Else assure that channels are appropriate

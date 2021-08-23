@@ -5,6 +5,7 @@ import random
 from joblib import Parallel, delayed
 from tqdm.notebook import tqdm
 import colorednoise as cn
+import mne
 from time import time
 from . import util
 
@@ -532,3 +533,51 @@ class Simulation:
         with open(file_name, 'wb') as f:
             pkl.dump(self, f)
 
+    def to_nontemporal(self):
+        ''' Converts the internal data representation from temporal to 
+        non-temporal. 
+        
+        Specifically, this changes the shape of sources from a
+        list of mne.sourceEstimate to a single mne.sourceEstimate in which the 
+        time dimension holds a concatenation of timepoints and samples.
+
+        The eeg data is reshaped from (samples, channels, time points) to 
+        (samples*time points, channels, 1).
+
+        Parameters
+        ----------
+        
+
+        Return
+        ------
+        self : esinet.Simulation
+            Method returns itself for convenience
+
+        '''
+        if not self.temporal:
+            print('This Simulation() instance is already non-temporal')
+            return self
+
+        self.temporal = False
+        self.settings['duration_of_trial'] = 0
+
+        eeg_data_lstm = self.eeg_data.get_data()
+        # Reshape EEG data
+        eeg_data_single = np.expand_dims(np.vstack(np.swapaxes(eeg_data_lstm, 1,2)), axis=-1)
+        # Pack into mne.EpochsArray object
+        epochs_single = mne.EpochsArray(eeg_data_single, self.eeg_data.info, 
+            tmin=self.eeg_data.tmin, verbose=0)
+        # Store the newly shaped data
+        self.eeg_data = epochs_single
+        
+        # Reshape Source data
+        source_data = np.vstack(np.swapaxes(np.stack(
+            [source.data for source in self.source_data], axis=0), 1,2)).T
+        # Pack into mne.SourceEstimate object
+        source_single = deepcopy(self.source_data[0])
+        source_single.data = source_data
+        self.source_data = source_single
+        
+        return self
+        
+        

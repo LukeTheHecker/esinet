@@ -15,7 +15,7 @@ def test_net_single_instance():
     sim = simulation.Simulation(fwd, info, settings=settings)
     sim.simulate(n_samples=10)
     # Create and train net
-    ann = Net(fwd, n_neurons=1)
+    ann = Net(fwd, n_dense_units=1)
     ann.fit(sim)
     assert not ann.temporal, 'Instance of Net() must not be temporal here!'
     # Predict
@@ -33,7 +33,7 @@ def test_net_temporal():
     sim = simulation.Simulation(fwd, info, settings=settings)
     sim.simulate(n_samples=10)
     # Create and train net
-    ann = Net(fwd, n_neurons=1)
+    ann = Net(fwd, n_dense_units=1)
     ann.fit(sim)
     assert ann.temporal, 'Instance of Net() must be temporal here!'
     

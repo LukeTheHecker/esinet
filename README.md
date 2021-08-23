@@ -19,7 +19,7 @@ Neural network design was created [here](http://alexlenail.me/NN-SVG/index.html)
 <br/><br/>
 
 ## Dependencies:
-* Python >= 3.8.3
+* [Python >= 3.8.3](https://www.python.org/downloads/)
 * [mne 0.22.0](https://mne.tools/stable/index.html)
   * Follow the [installation guide](https://mne.tools/stable/install/mne_python.html#installing-mne-python-and-its-dependencies)
 * [Tensorflow>=2.4.1](https://www.tensorflow.org/)
