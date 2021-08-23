@@ -1,2 +1,3 @@
 forward_models
 test_*.ipnyb
+logs/

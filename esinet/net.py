@@ -504,8 +504,9 @@ class Net:
         '''
         if self.temporal:
             # self._build_temporal_model()
-            # self._build_temporal_model_v2()
-            self._build_temporal_model_v3()
+            self._build_temporal_model_v2()
+            # self._build_temporal_model_v3()
+            # self._build_temporal_model_v4()
         else:
             self._build_perceptron_model()
         
@@ -516,6 +517,7 @@ class Net:
     def _build_temporal_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
+        print('yep, the oldest')
         self.model = keras.Sequential()
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (self.n_timepoints, self.n_channels)
@@ -598,10 +600,32 @@ class Net:
         model_m = keras.Model(inputs=inputs, outputs=output, name='multi_time_frame_model')
 
         self.model = model_m
+    
+
+    def _build_temporal_model_v4(self):
+        ''' A large and stupid model for testing
+        '''
+        n_timepoints = 3
+        inputs = keras.Input(shape=(n_timepoints, self.n_channels), name='Input')
+        # SINGLE TIME FRAME PATH
+        fc1 = TimeDistributed(Dense(self.n_dense_units, 
+            activation=self.activation_function), 
+            name='FC1')(inputs)
         
-        # model_m.summary()
-        # model_m.compile(loss='mse')
-        # model_m.fit(X, y)
+        fc2 = TimeDistributed(Dense(self.n_dense_units,
+            activation=self.activation_function), 
+            name='FC2')(fc1)
+
+        flat = Flatten(name='Flatten')(fc2)
+
+        last_fc = Dense(int(self.n_dipoles*n_timepoints), name='FC_Out')(flat)
+        out = Reshape((n_timepoints, self.n_dipoles))(last_fc)
+
+        model_s = keras.Model(inputs=inputs, outputs=out)
+
+        self.model = model_s
+    
+  
 
     def _freeze_lstm(self):
         for i, layer in enumerate(self.model.layers):
