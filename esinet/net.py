@@ -2,10 +2,12 @@ import mne
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-from tensorflow.keras.layers import (LSTM, Dense, Flatten, Bidirectional, 
-    TimeDistributed, InputLayer, Activation, Reshape, concatenate, Dropout)
+from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional, 
+    TimeDistributed, InputLayer, Activation, Reshape, concatenate, Concatenate, 
+    Dropout)
 from tensorflow.keras import backend as K
 from keras.layers.core import Lambda
+from scipy.optimize import minimize_scalar
 import datetime
 # from sklearn import linear_model
 import numpy as np
@@ -13,9 +15,9 @@ from scipy.stats import pearsonr
 from copy import deepcopy
 from time import time
 
-from tensorflow.python.keras.backend import dropout
 from . import util
 from . import losses
+from .custom_layers import BahdanauAttention, Attention
 
 class Net:
     ''' The neural network class that creates and trains the model. 
@@ -273,18 +275,18 @@ class Net:
         eeg : numpy.ndarray
             Scaled EEG
         '''
-
+        eeg_out = deepcopy(eeg)
         # Common average ref
         for sample in range(eeg.shape[0]):
             for time in range(eeg.shape[2]):
-                eeg[sample, :, time] -= np.mean(eeg[sample, :, time])
-                eeg[sample, :, time] /= eeg[sample, :, time].std()
+                eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
+                eeg_out[sample, :, time] /= eeg_out[sample, :, time].std()
         
         # Normalize
         # for sample in range(eeg.shape[0]):
         #     eeg[sample] /= eeg[sample].std()
 
-        return eeg
+        return eeg_out
             
 
     def scale_source(self, source):
@@ -300,11 +302,12 @@ class Net:
         source : numpy.ndarray
             Scaled sources
         '''
+        source_out = deepcopy(source)
         for sample in range(source.shape[0]):
             for time in range(source.shape[2]):
-                source[sample, :, time] /= np.max(np.abs(source[sample, :, time]))
+                source_out[sample, :, time] /= np.max(np.abs(source_out[sample, :, time]))
 
-        return source
+        return source_out
             
 
     def predict(self, *args):
@@ -358,15 +361,15 @@ class Net:
         # eeg_prep =  self._prep_eeg(eeg)
         eeg_prep = self.scale_eeg(eeg)
         
+        # Reshape to (samples, time, channels)
+        eeg_prep = np.swapaxes(eeg_prep, 1,2)
+
         # Predicted sources all in one go
-        if self.temporal:
-            eeg_prep = np.swapaxes(eeg_prep, 1,2)
         predicted_sources = self.predict_sources(eeg_prep)       
         
         # Rescale Predicitons
         # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
         predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
-
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
         if predicted_sources.shape[-1] == 1:
             predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[:, :, 0], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)]
@@ -391,24 +394,20 @@ class Net:
         assert len(eeg.shape)==3, 'eeg must be a 3D numpy array of dim (samples, channels, time)'
         if not self.temporal:
             # Predict sources all at once
-            n_samples, n_elec, n_time = eeg.shape
-            ## swap electrode and time axis
-            eeg_tmp = np.swapaxes(eeg, 1, 2)
+            n_samples, n_time, n_elec = eeg.shape
             ## reshape axis
             new_shape = (n_samples*n_time, n_elec)
-            eeg_tmp = eeg_tmp.reshape(new_shape)
+            eeg_tmp = eeg.reshape(new_shape)
             ## predict
             
             predicted_sources = self.model.predict(eeg_tmp)
             
             ## Get to old shape
             predicted_sources = predicted_sources.reshape(n_samples, n_time, self.n_dipoles)
-            predicted_sources = np.swapaxes(predicted_sources, 1,2)
         else:
-            
             predicted_sources = self.model.predict(eeg)
             
-            predicted_sources = np.swapaxes(predicted_sources,1,2)
+        predicted_sources = np.swapaxes(predicted_sources,1,2)
 
         return predicted_sources
 
@@ -418,7 +417,6 @@ class Net:
         '''
         assert len(y_est.shape) == 3, 'Sources must be 3-Dimensional'
         assert len(x_true.shape) == 3, 'EEG must be 3-Dimensional'
-
         y_est_scaled = deepcopy(y_est)
 
         for trial in range(x_true.shape[0]):
@@ -482,22 +480,82 @@ class Net:
         -------
         net = Net()
         net.fit(simulation)
-        mean_squared_errors = net.evaluate(simulation)
+        mean_squared_errors = net.evaluate_mse(simulation)
         print(mean_squared_errors.mean())
         '''
 
         eeg, sources = self._handle_data_input(args)
         
-        y_hat = self.mode.predict(eeg).data
-        y = sources.data
+        y_hat = self.predict(eeg)
+        
+        if type(y_hat) == list:
+            y_hat = np.stack([y.data for y in y_hat], axis=0)
+        else:
+            y_hat = y_hat.data
+
+        if type(sources) == list:
+            y = np.stack([y.data for y in sources], axis=0)
+        else:
+            y = sources.data
         mean_squared_errors = np.mean((y_hat - y)**2, axis=0)
 
         return mean_squared_errors
 
+    def evaluate_nmse(self, *args):
+        ''' Evaluate the model regarding normalized mean squared error
+        
+        Parameters
+        ----------
+        *args : 
+            Can be either 
+                eeg : mne.Epochs/ numpy.ndarray
+                    The simulated EEG data
+                sources : mne.SourceEstimates/ list of mne.SourceEstimates
+                    The simulated EEG data
+                or
+                simulation : esinet.simulation.Simulation
+                    The Simulation object
+
+        Return
+        ------
+        normalized_mean_squared_errors : numpy.ndarray
+            The normalized mean squared error of each sample
+
+        Example
+        -------
+        net = Net()
+        net.fit(simulation)
+        normalized_mean_squared_errors = net.evaluate_nmse(simulation)
+        print(normalized_mean_squared_errors.mean())
+        '''
+
+        eeg, sources = self._handle_data_input(args)
+        
+        y_hat = self.predict(eeg)
+        
+        if type(y_hat) == list:
+            y_hat = np.stack([y.data for y in y_hat], axis=0)
+        else:
+            y_hat = y_hat.data
+
+        if type(sources) == list:
+            y = np.stack([y.data for y in sources], axis=0)
+        else:
+            y = sources.data
+
+        for s in range(y_hat.shape[0]):
+            for t in range(y_hat.shape[2]):
+                y_hat[s, :, t] /= np.max(np.abs(y_hat[s, :, t]))
+                y[s, :, t] /= np.max(np.abs(y[s, :, t]))
+                
+        normalized_mean_squared_errors = np.mean((y_hat - y)**2, axis=0)
+
+        return normalized_mean_squared_errors
 
     def _build_model(self):
-        ''' Build the neural network architecture using the tensorflow.keras.Sequential() API. 
-        Depending on the input data this function will either build:
+        ''' Build the neural network architecture using the 
+        tensorflow.keras.Sequential() API. Depending on the input data this 
+        function will either build:
 
         (1) A simple single hidden layer fully connected ANN for single time instance data
         (2) A LSTM network for spatio-temporal prediction
@@ -506,7 +564,7 @@ class Net:
             # self._build_temporal_model()
             self._build_temporal_model_v2()
             # self._build_temporal_model_v3()
-            # self._build_temporal_model_v4()
+            # self._build_attention_model()
         else:
             self._build_perceptron_model()
         
@@ -515,9 +573,9 @@ class Net:
             self.model.summary()
     
     def _build_temporal_model(self):
-        ''' Build the temporal artificial neural network model using LSTM layers.
+        ''' Build the temporal artificial neural network model using LSTM 
+        layers.
         '''
-        print('yep, the oldest')
         self.model = keras.Sequential()
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (self.n_timepoints, self.n_channels)
@@ -542,25 +600,27 @@ class Net:
     def _build_temporal_model_v2(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
-        self.model = keras.Sequential()
+        self.model = keras.Sequential(name='LSTM_v2')
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (None, self.n_channels)
-        self.model.add(InputLayer(input_shape=input_shape))
+        self.model.add(InputLayer(input_shape=input_shape, name='Input'))
         
         # LSTM layers
-        for _ in range(self.n_lstm_layers):
+        for i in range(self.n_lstm_layers):
             self.model.add(Bidirectional(LSTM(self.n_lstm_units, 
                 return_sequences=True, input_shape=input_shape, 
-                dropout=self.dropout, activation=self.activation_function)))
+                dropout=self.dropout, activation=self.activation_function), 
+                name=f'RNN_{i}'))
 
         # Hidden Dense layer(s):
-        for _ in range(self.n_dense_layers-1):
-            self.model.add(Dense(self.n_dense_units, 
-                activation=self.activation_function))
+        for i in range(self.n_dense_layers):
+            self.model.add(TimeDistributed(Dense(self.n_dense_units, 
+                activation=self.activation_function), name=f'FC_{i}'))
+            self.model.add(Dropout(self.dropout, name=f'Drop_{i}'))
 
         # Final For-each layer:
         self.model.add(TimeDistributed(
-            Dense(self.n_dipoles, activation='linear'))
+            Dense(self.n_dipoles, activation='linear'), name='FC_Out')
         )
 
         self.model.build(input_shape=input_shape)
@@ -597,46 +657,55 @@ class Net:
             activation=self.activation_function), name='LSTM2')(concat)
 
         output = TimeDistributed(Dense(self.n_dipoles), name='FC_Out')(lstm2)
-        model_m = keras.Model(inputs=inputs, outputs=output, name='multi_time_frame_model')
+        model_m = keras.Model(inputs=inputs, outputs=output, name='LSTM_v3')
 
         self.model = model_m
     
 
-    def _build_temporal_model_v4(self):
-        ''' A large and stupid model for testing
-        '''
-        n_timepoints = 3
-        inputs = keras.Input(shape=(n_timepoints, self.n_channels), name='Input')
-        # SINGLE TIME FRAME PATH
-        fc1 = TimeDistributed(Dense(self.n_dense_units, 
-            activation=self.activation_function), 
-            name='FC1')(inputs)
+    
+    def _build_attention_model(self):
+        ''' Build the temporal artificial neural network model using LSTM 
+        layers and attention.
+        Attention code from: 
         
-        fc2 = TimeDistributed(Dense(self.n_dense_units,
-            activation=self.activation_function), 
-            name='FC2')(fc1)
+        https://machinelearningmastery.com/encoder-decoder-attention-sequence-to-sequence-prediction-keras/
 
-        flat = Flatten(name='Flatten')(fc2)
+        '''
 
-        last_fc = Dense(int(self.n_dipoles*n_timepoints), name='FC_Out')(flat)
-        out = Reshape((n_timepoints, self.n_dipoles))(last_fc)
+        tf.keras.backend.set_image_data_format('channels_last')
+        inputs = keras.Input(shape=(None, self.n_channels), name='Input')
+        
+       
+        lstm = Bidirectional(LSTM(self.n_lstm_units, return_sequences = True), name="bi_lstm_0")(inputs)
 
-        model_s = keras.Model(inputs=inputs, outputs=out)
+        # Getting our LSTM outputs
+        (lstm, forward_h, forward_c, backward_h, backward_c) = Bidirectional(
+            LSTM(self.n_lstm_units, return_sequences=True, return_state=True), 
+            activation=self.activation_function, name="bi_lstm_1")(input)
 
-        self.model = model_s
+        state_h = Concatenate()([forward_h, backward_h])
+        state_c = Concatenate()([forward_c, backward_c])
+        context_vector, attention_weights = Attention(self.n_lstm_units)(lstm, state_h)
+        dense1 = Dense(self.n_dense_units, activation=self.activation_function, )(context_vector)
+        # dropout = Dropout(0.05)(dense1)
+        output = Dense(self.n_dipoles, activation="linear")(dense1)
+        
+        model = keras.Model(inputs=inputs, outputs=output)
+
+        self.model.build(input_shape=input_shape)
     
   
 
     def _freeze_lstm(self):
         for i, layer in enumerate(self.model.layers):
-            if 'LSTM' in layer.name:
+            if 'LSTM' in layer.name or 'RNN' in layer.name:
                 print(f'freezing {layer.name}')
-
                 self.model.layers[i].trainable = False
     
     def _unfreeze_lstm(self):
         for i, layer in enumerate(self.model.layers):
-            if 'LSTM' in layer.name:
+            if 'LSTM' in layer.name or 'RNN' in layer.name:
+                print(f'unfreezing {layer.name}')
                 self.model.layers[i].trainable = True
     
     def _freeze_fc(self):
@@ -648,6 +717,7 @@ class Net:
     def _unfreeze_fc(self):
         for i, layer in enumerate(self.model.layers):
             if 'FC' in layer.name:
+                print(f'unfreezing {layer.name}')
                 self.model.layers[i].trainable = True
 
     def _build_perceptron_model(self):
@@ -714,51 +784,52 @@ class Net:
         x_true = np.squeeze(np.array(x_true))
         # Get EEG from predicted source using leadfield
         x_est = np.matmul(self.leadfield, y_est)
+
         gfp_true = np.std(x_true)
         gfp_est = np.std(x_est)
         scaler = gfp_true / gfp_est
         y_est_scaled = y_est * scaler
         return y_est_scaled
         
-    # def solve_p(self, y_est, x_true):
-    #     '''
-    #     Parameters
-    #     ---------
-    #     y_est : numpy.ndarray
-    #         The estimated source vector.
-    #     x_true : numpy.ndarray
-    #         The original input EEG vector.
+    def solve_p(self, y_est, x_true):
+        '''
+        Parameters
+        ---------
+        y_est : numpy.ndarray
+            The estimated source vector.
+        x_true : numpy.ndarray
+            The original input EEG vector.
         
-    #     Return
-    #     ------
-    #     y_scaled : numpy.ndarray
-    #         The scaled estimated source vector.
+        Return
+        ------
+        y_scaled : numpy.ndarray
+            The scaled estimated source vector.
         
-    #     '''
-    #     # Check if y_est is just zeros:
-    #     if np.max(y_est) == 0:
-    #         return y_est
-    #     y_est = np.squeeze(np.array(y_est))
-    #     x_true = np.squeeze(np.array(x_true))
-    #     # Get EEG from predicted source using leadfield
-    #     x_est = np.matmul(self.leadfield, y_est)
+        '''
+        # Check if y_est is just zeros:
+        if np.max(y_est) == 0:
+            return y_est
+        y_est = np.squeeze(np.array(y_est))
+        x_true = np.squeeze(np.array(x_true))
+        # Get EEG from predicted source using leadfield
+        x_est = np.matmul(self.leadfield, y_est)
 
-    #     # optimize forward solution
-    #     tol = 1e-3
-    #     options = dict(maxiter=1000, disp=False)
+        # optimize forward solution
+        tol = 1e-3
+        options = dict(maxiter=1000, disp=False)
 
-    #     # base scaling
-    #     rms_est = np.mean(np.abs(x_est))
-    #     rms_true = np.mean(np.abs(x_true))
-    #     base_scaler = rms_true / rms_est
+        # base scaling
+        rms_est = np.mean(np.abs(x_est))
+        rms_true = np.mean(np.abs(x_true))
+        base_scaler = rms_true / rms_est
 
         
-    #     opt = minimize_scalar(self.correlation_criterion, args=(self.leadfield, y_est* base_scaler, x_true), \
-    #         bounds=(0, 1), method='bounded', options=options, tol=tol)
+        opt = minimize_scalar(self.correlation_criterion, args=(self.leadfield, y_est* base_scaler, x_true), \
+            bounds=(0, 1), method='bounded', options=options, tol=tol)
         
-    #     scaler = opt.x
-    #     y_scaled = y_est * scaler * base_scaler
-    #     return y_scaled
+        scaler = opt.x
+        y_scaled = y_est * scaler * base_scaler
+        return y_scaled
 
     @staticmethod
     def correlation_criterion(scaler, leadfield, y_est, x_true):

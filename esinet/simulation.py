@@ -368,6 +368,12 @@ class Simulation:
         # since they can have entirely different scales.
         coil_types = [ch['coil_type'] for ch in self.info['chs']]
         coil_types_set = list(set(coil_types))
+        if len(coil_types_set)>1:
+            msg = f'Simulations attempted with more than one channel type \
+                ({coil_types_set}) may result in unexpected behavior. Please \
+                select one channel type in your data only'
+            raise ValueError(msg)
+            
         coil_types_set = np.array([int(i) for i in coil_types_set])
         
         coil_type_assignments = np.array(
@@ -411,12 +417,18 @@ class Simulation:
         short_shape = (sources_tmp.shape[0], 
             sources_tmp.shape[1]*sources_tmp.shape[2])
         sources_tmp = sources_tmp.reshape(short_shape)
+        # Scale to allow for lower precision
+        scaler = 1/sources_tmp.max()
+        sources_tmp *= scaler
         # Perform Matmul
-        result = np.matmul(leadfield, sources_tmp)
+        result = np.matmul(
+            leadfield.astype(np.float32), sources_tmp.astype(np.float32))
         # Reshape result
         result = result.reshape(result.shape[0], n_samples, n_timepoints)
         # swap axes to correct order
         result = np.swapaxes(result,0,1)
+        # Rescale
+        result /= scaler
         return result
 
 

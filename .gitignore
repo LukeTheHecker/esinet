@@ -6,6 +6,7 @@
 dev
 .vscode
 
+notes
 env
 build
 .pytest_cache
