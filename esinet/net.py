@@ -221,9 +221,12 @@ class Net:
         else:
             callbacks = [es]
         if optimizer is None:
-            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            # optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            optimizer = 'adam'
         if loss is None:
-            loss = self.default_loss(weight=false_positive_penalty, delta=delta)
+            # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
+            loss = 'mse'
+
 
         elif type(loss) == list:
             loss = loss[0](*loss[1])
