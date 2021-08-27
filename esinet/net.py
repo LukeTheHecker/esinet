@@ -232,6 +232,7 @@ class Net:
             loss = loss[0](*loss[1])
         if metrics is None:
             metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
+            print(metrics)
         
         # Compile if it wasnt compiled before
         if not self.compiled:
@@ -565,8 +566,8 @@ class Net:
         '''
         if self.temporal:
             # self._build_temporal_model()
-            self._build_temporal_model_v2()
-            # self._build_temporal_model_v3()
+            # self._build_temporal_model_v2()
+            self._build_temporal_model_v3()
             # self._build_attention_model()
         else:
             self._build_perceptron_model()
@@ -640,20 +641,20 @@ class Net:
             name='FC1')(inputs)
         fc1 = Dropout(self.dropout, name='Dropout1')(fc1)
 
-        fc2 = TimeDistributed(Dense(self.n_dipoles,
-            activation=self.activation_function), 
-            name='FC2')(fc1)
-        fc2 = Dropout(self.dropout, name='Dropout2')(fc2)
+        # fc2 = TimeDistributed(Dense(self.n_dipoles,
+        #     activation=self.activation_function), 
+        #     name='FC2')(fc1)
+        # fc2 = Dropout(self.dropout, name='Dropout2')(fc2)
 
-        model_s = keras.Model(inputs=inputs, outputs=fc2, 
-            name='single_time_ frame_model')
+        # model_s = keras.Model(inputs=inputs, outputs=fc2, 
+        #     name='single_time_ frame_model')
 
         # MULTI TIME FRAME PATH
         lstm1 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
             input_shape=(None, self.n_dense_units), dropout=self.dropout, 
-            activation=self.activation_function), name='LSTM1')(fc1)
+            activation=self.activation_function), name='LSTM1')(inputs)
 
-        concat = concatenate([lstm1, fc2], name='Concat')
+        concat = concatenate([lstm1, fc1], name='Concat')
 
         lstm2 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
             input_shape=(None, self.n_dense_units), dropout=self.dropout, 
