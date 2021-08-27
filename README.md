@@ -1,13 +1,7 @@
 # esinet: Electric source imaging using artificial neural networks (ANNs)
 
-**esinet** let's you solve the EEG inverse problem using ANNs. It currently supports two main architectures:
-## Model 1
+**esinet** let's you solve the EEG inverse problem using ANNs. It currently supports one architecture: A fully connected neural network which is trained on single time instances of M/EEG data. This model was described in our [paper](https://www.frontiersin.org/articles/10.3389/fnins.2021.569918/full).
 
-A fully connected neural network which is trained on single time instances of M/EEG data. This model was described in our [paper](https://www.frontiersin.org/articles/10.3389/fnins.2021.569918/full).
-
-## Model 2
-
-A temporal long-short-term memory (LSTM) model which is trained on sequences of EEG data. A similar model only with different output specifications has been presented in a work bei [Cui et al., 2019](https://ieeexplore.ieee.org/abstract/document/8766914?casa_token=AFbwwLcRySAAAAAA:Gx9_D5QajW1parwhStwtxPdLVVIT8WTbdzTg8bSZ1LT6mTuOTxYyLxd84Kc3k9n2fpqkL8Dl).
 
 ---
 
@@ -49,16 +43,16 @@ The following code demonstrates how to use this package:
 from esinet import Simulation, Net
 
 # Simulate M/EEG data
-settings = dict(duration_of_trial=0.2)
+settings = dict(duration_of_trial=0.)
 sim = Simulation(fwd, info, settings=settings)
 sim.simulate(n_samples=10000)
 
-# Train neural network (LSTM) on the simulated data
+# Train neural network on the simulated data
 net = Net(fwd)
-ann.fit(sim)
+net.fit(sim)
 
 # Perform predictions on your data
-stc = ann.predict(epochs)
+stc = net.predict(epochs)
 
 ```
 
@@ -66,10 +60,9 @@ stc = ann.predict(epochs)
 
 Check out one of the [tutorials](tutorials/) to learn how to use the package:
 
-* [Tutorial 1](tutorials/tutorial_1.ipynb): The fastest way to get started with Model 1. This tutorial can be used as an entry point. If you want to dig deeper you should have a look at the next tutorials, too!
+* [Tutorial 1](tutorials/tutorial_1.ipynb): The fastest way to get started with the fully-connected ANN. This tutorial can be used as an entry point. If you want to dig deeper you should have a look at the next tutorials, too!
 * [Tutorial 2](tutorials/tutorial_2.ipynb): Use esinet with low-level functions that allow for more control over your parameters with respect to simulations and training of the neural network.
 * [Tutorial 3](tutorials/tutorial_3.ipynb): A demonstration of simulation parameters and how they affect the model performance.
-* [Tutorial 4](tutorials/tutorial_4.ipynb): Learn to use the LSTM network (Model 2) to predict source time-series from EEG time-series.
 
 
 # Feedback

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.1 27.08.2021
+* Reverted some changes that turned out not to be functional yet
+
 ## 0.1.0 19.08.2021
 * Changed API from functional to object-oriented
 * New Tutorials

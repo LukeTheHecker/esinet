@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="esinet",
-    version="0.1.0",
+    version="0.1.1",
     author="Lukas Hecker",
     author_email="lukas_hecker@web.de",
     description="Solves the M/EEG inverse problem using artificial neural networks with Python 3 and the MNE library.",

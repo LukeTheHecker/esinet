@@ -270,7 +270,7 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0),
     data_span=(0, 0.5), n_samples=int(1e4), optimizer=None, learning_rate=0.001, 
     validation_split=0.1, n_epochs=100, metrics=None, device=None, delta=1, 
     batch_size=128, loss=None, false_positive_penalty=2, parallel=False, 
-    verbose=False):
+    verbose=True):
     ''' The all-in-one convenience function for esinet.
     
     Parameters

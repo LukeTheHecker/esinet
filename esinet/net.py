@@ -34,14 +34,7 @@ class Net:
         The activation function used for each fully connected layer.
     n_jobs : int
         Number of jobs/ cores to use during parallel processing
-    model : str
-        Determines the neural network architecture.
-            'auto' : automated selection for fully connected if training data 
-                contains single time instances (non-temporal data)
-            'single' : The single time instance model that does not learn 
-                temporal relations.
-            'temporal' : The LSTM model which estimates multiples inverse 
-                solutions in one go.
+
     Methods
     -------
     fit : trains the neural network with the EEG and source data
@@ -52,7 +45,7 @@ class Net:
     
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=1, 
         n_dense_units=100, n_lstm_units=100, activation_function='swish', 
-        n_jobs=-1, model_type='auto', verbose=True):
+        n_jobs=-1, verbose=True):
 
         self._embed_fwd(fwd)
         
@@ -65,8 +58,8 @@ class Net:
         self.default_loss = losses.weighted_huber_loss
         # self.parallel = parallel
         self.n_jobs = n_jobs
-        self.model_type = model_type
         self.compiled = False
+        self.temporal = False
         self.verbose = verbose
 
     def _embed_fwd(self, fwd):
@@ -177,11 +170,7 @@ class Net:
         eeg, sources = self._handle_data_input(args)
         self.subject = sources.subject if type(sources) == mne.SourceEstimate \
             else sources[0].subject
-        # Decide gross model architecture
-        if self.model_type == 'single' or (self.model_type=='auto' and type(sources) != list):
-            self.temporal = False
-        else:
-            self.temporal = True
+        
         
         # Ensure that the forward model has the same 
         # channels as the eeg object
@@ -221,11 +210,11 @@ class Net:
         else:
             callbacks = [es]
         if optimizer is None:
-            # optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            optimizer = 'adam'
+            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            # optimizer = 'adam'
         if loss is None:
-            # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
-            loss = 'mse'
+            loss = self.default_loss(weight=false_positive_penalty, delta=delta)
+            # loss = 'mse'
 
 
         elif type(loss) == list:
@@ -233,21 +222,16 @@ class Net:
         if metrics is None:
             metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
             # metrics = ['mae']
-            print(metrics)
         
         # Compile if it wasnt compiled before
         if not self.compiled:
             self.model.compile(optimizer, loss, metrics=metrics)
             self.compiled = True
 
-        if self.temporal:
-            # LSTM net expects dimensions to be: (samples, time, channels)
-            x_scaled = np.swapaxes(x_scaled,1,2)
-            y_scaled = np.swapaxes(y_scaled,1,2)
-        else:
-            # Squeeze to remove empty time dimension
-            x_scaled = np.squeeze(x_scaled)
-            y_scaled = np.squeeze(y_scaled)
+
+        # Squeeze to remove empty time dimension
+        x_scaled = np.squeeze(x_scaled)
+        y_scaled = np.squeeze(y_scaled)
 
         if device is None:
             history = self.model.fit(x_scaled, y_scaled, 
@@ -566,10 +550,8 @@ class Net:
         (2) A LSTM network for spatio-temporal prediction
         '''
         if self.temporal:
-            # self._build_temporal_model()
-            # self._build_temporal_model_v2()
-            self._build_temporal_model_v3()
-            # self._build_attention_model()
+            msg = 'A temporal model is not yet developed'
+            raise ValueError(msg)
         else:
             self._build_perceptron_model()
         
@@ -577,154 +559,6 @@ class Net:
         if self.verbose:
             self.model.summary()
     
-    def _build_temporal_model(self):
-        ''' Build the temporal artificial neural network model using LSTM 
-        layers.
-        '''
-        self.model = keras.Sequential()
-        tf.keras.backend.set_image_data_format('channels_last')
-        input_shape = (self.n_timepoints, self.n_channels)
-        self.model.add(InputLayer(input_shape=input_shape))
-        
-        for _ in range(self.n_lstm_layers):
-            self.model.add(Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
-                input_shape=(self.n_timepoints, self.n_channels), 
-                dropout=self.dropout, activation=self.activation_function)))
-        self.model.add(Flatten())
-
-        self.model.add(Dense(int(self.n_timepoints*self.n_dipoles), 
-            activation='linear'))
-
-        self.model.add(Dense(int(self.n_timepoints*self.n_dipoles), 
-            activation='linear'))
-        self.model.add(Reshape((self.n_timepoints, self.n_dipoles)))
-        self.model.add(Activation('linear'))
-        
-        self.model.build(input_shape=input_shape)
-        
-    def _build_temporal_model_v2(self):
-        ''' Build the temporal artificial neural network model using LSTM layers.
-        '''
-        self.model = keras.Sequential(name='LSTM_v2')
-        tf.keras.backend.set_image_data_format('channels_last')
-        input_shape = (None, self.n_channels)
-        self.model.add(InputLayer(input_shape=input_shape, name='Input'))
-        
-        # LSTM layers
-        for i in range(self.n_lstm_layers):
-            self.model.add(Bidirectional(LSTM(self.n_lstm_units, 
-                return_sequences=True, input_shape=input_shape, 
-                dropout=self.dropout, activation=self.activation_function), 
-                name=f'RNN_{i}'))
-
-        # Hidden Dense layer(s):
-        for i in range(self.n_dense_layers):
-            self.model.add(TimeDistributed(Dense(self.n_dense_units, 
-                activation=self.activation_function), name=f'FC_{i}'))
-            self.model.add(Dropout(self.dropout, name=f'Drop_{i}'))
-
-        # Final For-each layer:
-        self.model.add(TimeDistributed(
-            Dense(self.n_dipoles, activation='linear'), name='FC_Out')
-        )
-
-        self.model.build(input_shape=input_shape)
-
-
-    def _build_temporal_model_v3(self):
-        ''' A mixed dense / LSTM network, inspired by:
-        "Deep Burst Denoising" (Godarg et al., 2018)
-        '''
-        inputs = keras.Input(shape=(None, self.n_channels), name='Input')
-        # SINGLE TIME FRAME PATH
-        fc1 = TimeDistributed(Dense(self.n_dense_units, 
-            activation=self.activation_function), 
-            name='FC1')(inputs)
-        fc1 = Dropout(self.dropout, name='Dropout1')(fc1)
-
-        # fc2 = TimeDistributed(Dense(self.n_dipoles,
-        #     activation=self.activation_function), 
-        #     name='FC2')(fc1)
-        # fc2 = Dropout(self.dropout, name='Dropout2')(fc2)
-
-        # model_s = keras.Model(inputs=inputs, outputs=fc2, 
-        #     name='single_time_ frame_model')
-
-        # MULTI TIME FRAME PATH
-        lstm1 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
-            input_shape=(None, self.n_dense_units), dropout=self.dropout, 
-            activation=self.activation_function), name='LSTM1')(inputs)
-
-        concat = concatenate([lstm1, fc1], name='Concat')
-
-        lstm2 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
-            input_shape=(None, self.n_dense_units), dropout=self.dropout, 
-            activation=self.activation_function), name='LSTM2')(concat)
-
-        output = TimeDistributed(Dense(self.n_dipoles), name='FC_Out')(lstm2)
-        model_m = keras.Model(inputs=inputs, outputs=output, name='LSTM_v3')
-
-        self.model = model_m
-    
-
-    
-    def _build_attention_model(self):
-        ''' Build the temporal artificial neural network model using LSTM 
-        layers and attention.
-        Attention code from: 
-        
-        https://machinelearningmastery.com/encoder-decoder-attention-sequence-to-sequence-prediction-keras/
-
-        '''
-
-        tf.keras.backend.set_image_data_format('channels_last')
-        inputs = keras.Input(shape=(None, self.n_channels), name='Input')
-        
-       
-        lstm = Bidirectional(LSTM(self.n_lstm_units, return_sequences = True), name="bi_lstm_0")(inputs)
-
-        # Getting our LSTM outputs
-        (lstm, forward_h, forward_c, backward_h, backward_c) = Bidirectional(
-            LSTM(self.n_lstm_units, return_sequences=True, return_state=True), 
-            activation=self.activation_function, name="bi_lstm_1")(input)
-
-        state_h = Concatenate()([forward_h, backward_h])
-        state_c = Concatenate()([forward_c, backward_c])
-        context_vector, attention_weights = Attention(self.n_lstm_units)(lstm, state_h)
-        dense1 = Dense(self.n_dense_units, activation=self.activation_function, )(context_vector)
-        # dropout = Dropout(0.05)(dense1)
-        output = Dense(self.n_dipoles, activation="linear")(dense1)
-        
-        model = keras.Model(inputs=inputs, outputs=output)
-
-        self.model.build(input_shape=input_shape)
-    
-  
-
-    def _freeze_lstm(self):
-        for i, layer in enumerate(self.model.layers):
-            if 'LSTM' in layer.name or 'RNN' in layer.name:
-                print(f'freezing {layer.name}')
-                self.model.layers[i].trainable = False
-    
-    def _unfreeze_lstm(self):
-        for i, layer in enumerate(self.model.layers):
-            if 'LSTM' in layer.name or 'RNN' in layer.name:
-                print(f'unfreezing {layer.name}')
-                self.model.layers[i].trainable = True
-    
-    def _freeze_fc(self):
-        for i, layer in enumerate(self.model.layers):
-            if 'FC' in layer.name and not 'Out' in layer.name:
-                print(f'freezing {layer.name}')
-                self.model.layers[i].trainable = False
-
-    def _unfreeze_fc(self):
-        for i, layer in enumerate(self.model.layers):
-            if 'FC' in layer.name:
-                print(f'unfreezing {layer.name}')
-                self.model.layers[i].trainable = True
-
     def _build_perceptron_model(self):
         ''' Build the artificial neural network model using Dense layers.
         '''
@@ -738,8 +572,6 @@ class Net:
         
         # Build model with input layer
         self.model.build(input_shape=(None, self.n_channels))
-
-    
 
 
     def _check_model(self, eeg):
