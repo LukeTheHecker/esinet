@@ -232,6 +232,7 @@ class Net:
             loss = loss[0](*loss[1])
         if metrics is None:
             metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
+            # metrics = ['mae']
             print(metrics)
         
         # Compile if it wasnt compiled before
