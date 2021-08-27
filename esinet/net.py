@@ -502,9 +502,14 @@ class Net:
             y = np.stack([y.data for y in sources], axis=0)
         else:
             y = sources.data
-        mean_squared_errors = np.mean((y_hat - y)**2, axis=0)
+        
+        if len(y_hat.shape) == 2:
+            y = np.expand_dims(y, axis=0)
+            y_hat = np.expand_dims(y_hat, axis=0)
 
+        mean_squared_errors = np.mean((y_hat - y)**2, axis=1)
         return mean_squared_errors
+
 
     def evaluate_nmse(self, *args):
         ''' Evaluate the model regarding normalized mean squared error
@@ -547,14 +552,18 @@ class Net:
             y = np.stack([y.data for y in sources], axis=0)
         else:
             y = sources.data
+        
+        if len(y_hat.shape) == 2:
+            y = np.expand_dims(y, axis=0)
+            y_hat = np.expand_dims(y_hat, axis=0)
 
         for s in range(y_hat.shape[0]):
             for t in range(y_hat.shape[2]):
                 y_hat[s, :, t] /= np.max(np.abs(y_hat[s, :, t]))
                 y[s, :, t] /= np.max(np.abs(y[s, :, t]))
-                
-        normalized_mean_squared_errors = np.mean((y_hat - y)**2, axis=0)
-
+        
+        normalized_mean_squared_errors = np.mean((y_hat - y)**2, axis=1)
+        
         return normalized_mean_squared_errors
 
     def _build_model(self):
