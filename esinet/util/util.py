@@ -406,3 +406,14 @@ def convert_simulation_temporal_to_single(sim):
     sim_single.source_data = source_single
 
     return sim_single
+
+def collapse(x):
+    ''' Collapse a  3D matrix (samples x dipoles x timepoints) into a 2D array 
+    by combining the first and last dim.
+    
+    Parameters
+    ----------
+    x : numpy.ndarray
+        Three-dimensional matrix, e.g. (samples x dipoles x timepoints)
+    '''
+    return np.swapaxes(x, 1,2).reshape(int(x.shape[0]*x.shape[2]), x.shape[1])

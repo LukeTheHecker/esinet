@@ -1,5 +1,6 @@
 from copy import deepcopy
 import numpy as np
+from scipy.spatial.distance import cdist
 import pickle as pkl
 import random
 from joblib import Parallel, delayed
@@ -222,8 +223,10 @@ class Simulation:
         
         ##############################################
         # Loop through source centers (i.e. seeds of source positions)
+        distance_matrix = cdist(self.pos, self.pos)
         for i, (src_center, shape, amplitude, signal) in enumerate(zip(src_centers, shapes, amplitudes, signals)):
-            dists = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))
+            # dists = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))
+            dists = distance_matrix[src_center]
             d = np.where(dists<extents[i]/2)[0]
 
             if shape == 'gaussian':

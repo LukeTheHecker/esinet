@@ -214,7 +214,7 @@ class Net:
         es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', \
             mode='min', verbose=self.verbose, patience=patience, restore_best_weights=True)
         if tensorboard:
-            log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            log_dir = "logs/fit/" + self.model.name + '_' + datetime.datetime.now().strftime("%m%d-%H%M")
             tensorboard_callback = tf.keras.callbacks.TensorBoard(
                 log_dir=log_dir, histogram_freq=1)
             callbacks = [es, tensorboard_callback]
@@ -222,7 +222,7 @@ class Net:
             callbacks = [es]
         if optimizer is None:
             # optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            optimizer = 'adam'
+            optimizer = tf.keras.optimizers.Adam(clipnorm=1.)
         if loss is None:
             # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
             loss = 'mse'
@@ -231,9 +231,8 @@ class Net:
         elif type(loss) == list:
             loss = loss[0](*loss[1])
         if metrics is None:
-            metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
-            # metrics = ['mae']
-            print(metrics)
+            # metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
+            metrics = ['mae']
         
         # Compile if it wasnt compiled before
         if not self.compiled:
@@ -337,7 +336,7 @@ class Net:
         
         
         eeg, _ = self._handle_data_input(args)
-        
+
         if isinstance(eeg, util.EVOKED_INSTANCES):
             # Ensure there are no extra channels in our EEG
             eeg = eeg.pick_channels(self.fwd.ch_names)    
@@ -574,9 +573,9 @@ class Net:
         (1) A simple single hidden layer fully connected ANN for single time instance data
         (2) A LSTM network for spatio-temporal prediction
         '''
-        if self.temporal:
-            # self._build_temporal_model()
-            # self._build_temporal_model_v2()
+        if (self.temporal and self.model_type=='auto') or self.model_type=='v2':
+            self._build_temporal_model_v2()
+        elif self.temporal and self.model_type=='v3':
             self._build_temporal_model_v3()
             # self._build_attention_model()
         else:
