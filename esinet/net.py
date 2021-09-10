@@ -222,7 +222,8 @@ class Net:
             callbacks = [es]
         if optimizer is None:
             # optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            optimizer = tf.keras.optimizers.Adam(clipnorm=1.)
+            print('clip clap')
+            optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
         if loss is None:
             # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
             loss = 'mse'
@@ -265,6 +266,104 @@ class Net:
         else:
             return self
 
+    def prep_data(self, *args,  dropout=0.2):
+        ''' Train the neural network using training data (eeg) and labels (sources).
+        
+        Parameters
+        ----------
+        *args : 
+            Can be either two objects: 
+                eeg : mne.Epochs/ numpy.ndarray
+                    The simulated EEG data
+                sources : mne.SourceEstimates/ list of mne.SourceEstimates
+                    The simulated EEG data
+                or only one:
+                simulation : esinet.simulation.Simulation
+                    The Simulation object
+
+            - two objects: EEG object (e.g. mne.Epochs) and Source object (e.g. mne.SourceEstimate)
+        
+        optimizer : tf.keras.optimizers
+            The optimizer that for backpropagation.
+        learning_rate : float
+            The learning rate for training the neural network
+        validation_split : float
+            Proportion of data to keep as validation set.
+        delta : int/float
+            The delta parameter of the huber loss function
+        epochs : int
+            Number of epochs to train. In one epoch all training samples 
+            are used once for training.
+        metrics : list/str
+            The metrics to be used for performance monitoring during training.
+        device : str
+            The device to use, e.g. a graphics card.
+        false_positive_penalty : float
+            Defines weighting of false-positive predictions. Increase for conservative 
+            inverse solutions, decrease for liberal prediction.
+        batch_size : int
+            The number of samples to simultaneously calculate the error 
+            during backpropagation.
+        loss : tf.keras.losses
+            The loss function.
+        sample_weight : numpy.ndarray
+            Optional numpy array of sample weights.
+
+        Return
+        ------
+        self : esinet.Net
+            Method returns the object itself.
+
+        '''
+
+        
+        eeg, sources = self._handle_data_input(args)
+        self.subject = sources.subject if type(sources) == mne.SourceEstimate \
+            else sources[0].subject
+        # Decide gross model architecture
+        if self.model_type == 'single' or (self.model_type=='auto' and type(sources) != list):
+            self.temporal = False
+        else:
+            self.temporal = True
+        
+        # Ensure that the forward model has the same 
+        # channels as the eeg object
+        # self._check_model(eeg)
+
+        # Handle EEG input
+        eeg = eeg.get_data()
+
+        # Handle source input
+        if type(sources) == mne.source_estimate.SourceEstimate:
+            sources = sources.data.T
+            # add empty temporal dimension
+            sources = np.expand_dims(sources, axis=2)
+        elif type(sources) == list:
+            if type(sources[0]) == mne.source_estimate.SourceEstimate:
+                sources = np.stack([source.data for source in sources], axis=0)
+        
+        
+        # Extract data
+        y = sources
+        x = eeg
+
+        # Prepare data
+        # Scale sources
+        y_scaled = self.scale_source(y)
+        # Scale EEG
+        x_scaled = self.scale_eeg(x)
+
+        # Compile if it wasnt compiled before
+        if self.temporal:
+            # LSTM net expects dimensions to be: (samples, time, channels)
+            x_scaled = np.swapaxes(x_scaled,1,2)
+            y_scaled = np.swapaxes(y_scaled,1,2)
+        else:
+            # Squeeze to remove empty time dimension
+            x_scaled = np.squeeze(x_scaled)
+            y_scaled = np.squeeze(y_scaled)
+        return x_scaled, y_scaled
+
     def scale_eeg(self, eeg):
         ''' Scales the EEG prior to training/ predicting with the neural 
         network.
@@ -280,7 +379,7 @@ class Net:
             Scaled EEG
         '''
         eeg_out = deepcopy(eeg)
-        # Common average ref
+        # Common average ref & unit variance
         for sample in range(eeg.shape[0]):
             for time in range(eeg.shape[2]):
                 eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
@@ -309,7 +408,8 @@ class Net:
         source_out = deepcopy(source)
         for sample in range(source.shape[0]):
             for time in range(source.shape[2]):
-                source_out[sample, :, time] /= np.max(np.abs(source_out[sample, :, time]))
+                source_out[sample, :, time] /= source_out[sample, :, time].std()
+                # source_out[sample, :, time] /= np.max(np.abs(source_out[sample, :, time]))
 
         return source_out
             
@@ -674,7 +774,7 @@ class Net:
 
         self.model = model_m
     
-
+    
     
     def _build_attention_model(self):
         ''' Build the temporal artificial neural network model using LSTM 
@@ -864,6 +964,56 @@ class Net:
         x_est = np.matmul(leadfield, y_est) 
         error = np.abs(pearsonr(x_true-x_est, x_true)[0])
         return error
+    
+
+def build_nas_lstm(hp):
+    ''' Find optimal model using keras tuner.
+    
+    '''
+    n_dipoles = 1284
+    n_channels = 61
+    n_lstm_layers = hp.Int("lstm_layers", min_value=0, max_value=3, step=1)
+    n_dense_layers = hp.Int("dense_layers", min_value=0, max_value=3, step=1)
+    activation_out = hp.Choice(f"activation_out", ["tanh", 'sigmoid', 'linear'])
+    all_acts = ['sigmoid', 'swish', 'relu', 'elu', 'linear']
+    activation = hp.Choice('actvation_all', all_acts)
+    model = keras.Sequential(name='LSTM_NAS')
+    tf.keras.backend.set_image_data_format('channels_last')
+    input_shape = (None, n_channels)
+    model.add(InputLayer(input_shape=input_shape, name='Input'))
+
+    # LSTM layers
+    for i in range(n_lstm_layers):
+        n_lstm_units = hp.Int(f"lstm_units_l-{i}", min_value=2, max_value=200, step=1)
+        dropout = hp.Float(f"dropout_lstm_l-{i}", min_value=0, max_value=0.9)
+        model.add(Bidirectional(LSTM(n_lstm_units, 
+            return_sequences=True, input_shape=input_shape, 
+            dropout=dropout, activation=activation), 
+            name=f'LSTM{i}'))
+    # Hidden Dense layer(s):
+    for i in range(n_dense_layers):
+        n_dense_units = hp.Int(f"dense_units_l-{i}", min_value=25, max_value=300, step=1)
+        dropout = hp.Float(f"dropout_dense_l-{i}", min_value=0, max_value=0.9)
+
+        model.add(TimeDistributed(Dense(n_dense_units, 
+            activation=activation), name=f'FC_{i}'))
+        model.add(Dropout(dropout, name=f'DropoutLayer_dense_{i}'))
+
+    # Final For-each layer:
+    model.add(TimeDistributed(
+        Dense(n_dipoles, activation=activation_out), name='FC_Out')
+    )
+    model.build(input_shape=input_shape)
+
+    model.compile(
+        optimizer=keras.optimizers.Adam(
+            hp.Float("learning_rate", min_value=0.0005, max_value=0.05,),
+            clipvalue = hp.Float("Clip Value", min_value=0.1, max_value=1)
+        ),
+        loss="huber",
+        metrics=["mse", "mae"],
+    )
+    return model
 
 # class EnsembleNet:
 #     ''' Uses ensemble of neural networks to perform predictions

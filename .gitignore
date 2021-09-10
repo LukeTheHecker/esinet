@@ -10,6 +10,7 @@ dev
 logs
 notes
 env
+keras-tuner
 build
 .pytest_cache
 dist
