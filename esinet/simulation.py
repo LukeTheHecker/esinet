@@ -1,5 +1,6 @@
 from copy import deepcopy
 import numpy as np
+import pandas as pd
 from scipy.spatial.distance import cdist
 import pickle as pkl
 import random
@@ -17,7 +18,7 @@ DEFAULT_SETTINGS = {
             'shapes': 'both',
             'duration_of_trial': 0,
             'sample_frequency': 100,
-            'target_snr': 4,
+            'target_snr': (0.5, 10),
             'beta': (0, 3),
         }
 
@@ -76,6 +77,7 @@ class Simulation:
         self.fwd.pick_channels(info['ch_names'])
         self.check_info(deepcopy(info))
         self.info['sfreq'] = self.settings['sample_frequency']
+        self.prepare_simulation_info()
         self.subject = self.fwd['src'][0]['subject_his_id']
         self.n_jobs = n_jobs
         self.parallel = parallel
@@ -86,9 +88,14 @@ class Simulation:
     def check_info(self, info):
         self.info = info.pick_channels(self.fwd.ch_names, ordered=True)
 
+    def prepare_simulation_info(self):
+        self.simulation_info = pd.DataFrame(columns=['number_of_sources', 'positions', 'extents', 'amplitudes', 'shapes', 'target_snr', 'betas'])
 
     def simulate(self, n_samples=10000):
         ''' Simulate sources and EEG data'''
+        
+        self.n_samples = n_samples
+
         self.source_data = self.simulate_sources(n_samples)
         self.eeg_data = self.simulate_eeg()
 
@@ -246,12 +253,9 @@ class Simulation:
                 raise(msg)
             # sourceMask[d] = 1
 
-        # if durOfTrial > 0:
-        # n = np.clip(int(sample_frequency * self.settings['duration_of_trial']), a_min=1, a_max=None)
-        # sourceOverTime = util.repeat_newcol(source, n)
-        # source = np.squeeze(sourceOverTime * signal)
-        # if len(source.shape) == 1:
-        #     source = np.expand_dims(source, axis=1)
+        # Document the sample
+        d = dict(number_of_sources=number_of_sources, positions=self.pos[src_centers], extents=extents, amplitudes=amplitudes, shapes=shapes, target_snr=0)
+        self.simulation_info = self.simulation_info.append(d, ignore_index=True)
         return source
 
     def simulate_eeg(self):
@@ -298,10 +302,16 @@ class Simulation:
 
         # Load some forward model objects
         fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
-        n_samples, _, _ = sources.shape
         n_elec = leadfield.shape[0]
+        n_samples, _, _ = sources.shape
 
-        
+        target_snrs = [self.get_from_range(self.settings['target_snr'], dtype=float) for _ in range(n_samples)]
+        betas = [self.get_from_range(self.settings['beta'], dtype=float) for _ in range(n_samples)]
+
+        # Document snr and beta into the simulation info
+        self.simulation_info['betas'] = betas
+        self.simulation_info['target_snr'] = target_snrs
+            
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
         if self.verbose:
             print(f'\nProject sources to EEG...')
@@ -312,12 +322,12 @@ class Simulation:
         if self.parallel:
             eeg_trials_noisy = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
                 (delayed(self.create_eeg_helper)(eeg_clean[sample], n_simulation_trials,
-                self.settings['target_snr'], self.settings['beta']) 
+                target_snrs[sample], betas[sample]) 
                 for sample in tqdm(range(n_samples))), axis=0)
         else:
             eeg_trials_noisy = np.stack(
                 [self.create_eeg_helper(eeg_clean[sample], n_simulation_trials, 
-                self.settings['target_snr'], self.settings['beta']) 
+                target_snrs[sample], betas[sample]) 
                 for sample in tqdm(range(n_samples))], 
                 axis=0)
             
@@ -349,15 +359,12 @@ class Simulation:
             data sample with dimension (time_points, electrodes)
         n_simulation_trials : int
             The number of trials desired
-        target_snr : float/list/tuple
-            The target signal-to-noise ratio, is converted to 
-            single-trial SNR based on number of trials
-        beta : float/list/tuple
+        target_snr : float
+            The target signal-to-noise ratio
+        beta : float
             The beta exponent of the 1/f**beta noise
 
         '''
-        target_snr = self.get_from_range(target_snr, dtype=float)
-        beta = self.get_from_range(beta, dtype=float)
         
         assert len(eeg_sample.shape) == 2, 'Length of eeg_sample must be 2 (time_points, electrodes)'
         

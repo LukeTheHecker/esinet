@@ -16,6 +16,7 @@ from copy import deepcopy
 from time import time
 
 from . import util
+from . import evaluate
 from . import losses
 from .custom_layers import BahdanauAttention, Attention
 
@@ -82,8 +83,9 @@ class Net:
         self.leadfield = leadfield
         self.n_channels = leadfield.shape[0]
         self.n_dipoles = leadfield.shape[1]
-        
-    def _handle_data_input(self, arguments):
+    
+    @staticmethod
+    def _handle_data_input(arguments):
         ''' Handles data input to the functions fit() and predict().
         
         Parameters
@@ -222,11 +224,12 @@ class Net:
             callbacks = [es]
         if optimizer is None:
             # optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            print('clip clap')
-            optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
+            # optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
+            optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate,
+                momentum=0.35)
         if loss is None:
             # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
-            loss = 'mse'
+            loss = 'huber'
 
 
         elif type(loss) == list:
@@ -719,17 +722,34 @@ class Net:
         self.model.add(InputLayer(input_shape=input_shape, name='Input'))
         
         # LSTM layers
+        if not isinstance(self.n_lstm_units, (tuple, list)):
+            self.n_lstm_units = [self.n_lstm_units] * self.n_lstm_layers
+        
+        if not isinstance(self.dropout, (tuple, list)):
+            dropout = [self.dropout]*self.n_lstm_layers
+        else:
+            dropout = self.dropout
+        
         for i in range(self.n_lstm_layers):
-            self.model.add(Bidirectional(LSTM(self.n_lstm_units, 
+            self.model.add(Bidirectional(LSTM(self.n_lstm_units[i], 
                 return_sequences=True, input_shape=input_shape, 
-                dropout=self.dropout, activation=self.activation_function), 
+                dropout=dropout[i], activation=self.activation_function), 
                 name=f'RNN_{i}'))
 
         # Hidden Dense layer(s):
+        if not isinstance(self.n_dense_units, (tuple, list)):
+            self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
+        
+        if not isinstance(self.dropout, (tuple, list)):
+            dropout = [self.dropout]*self.n_dense_layers
+        else:
+            dropout = self.dropout
+        
+
         for i in range(self.n_dense_layers):
-            self.model.add(TimeDistributed(Dense(self.n_dense_units, 
+            self.model.add(TimeDistributed(Dense(self.n_dense_units[i], 
                 activation=self.activation_function), name=f'FC_{i}'))
-            self.model.add(Dropout(self.dropout, name=f'Drop_{i}'))
+            self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
 
         # Final For-each layer:
         self.model.add(TimeDistributed(
@@ -968,15 +988,14 @@ class Net:
 
 def build_nas_lstm(hp):
     ''' Find optimal model using keras tuner.
-    
     '''
     n_dipoles = 1284
     n_channels = 61
     n_lstm_layers = hp.Int("lstm_layers", min_value=0, max_value=3, step=1)
     n_dense_layers = hp.Int("dense_layers", min_value=0, max_value=3, step=1)
-    activation_out = hp.Choice(f"activation_out", ["tanh", 'sigmoid', 'linear'])
-    all_acts = ['sigmoid', 'swish', 'relu', 'elu', 'linear']
-    activation = hp.Choice('actvation_all', all_acts)
+    activation_out = 'linear'  # hp.Choice(f"activation_out", ["tanh", 'sigmoid', 'linear'])
+    activation = 'relu'  # hp.Choice('actvation_all', all_acts)
+
     model = keras.Sequential(name='LSTM_NAS')
     tf.keras.backend.set_image_data_format('channels_last')
     input_shape = (None, n_channels)
@@ -984,16 +1003,16 @@ def build_nas_lstm(hp):
 
     # LSTM layers
     for i in range(n_lstm_layers):
-        n_lstm_units = hp.Int(f"lstm_units_l-{i}", min_value=2, max_value=200, step=1)
-        dropout = hp.Float(f"dropout_lstm_l-{i}", min_value=0, max_value=0.9)
+        n_lstm_units = hp.Int(f"lstm_units_l-{i}", min_value=25, max_value=500, step=1)
+        dropout = hp.Float(f"dropout_lstm_l-{i}", min_value=0, max_value=0.5)
         model.add(Bidirectional(LSTM(n_lstm_units, 
             return_sequences=True, input_shape=input_shape, 
             dropout=dropout, activation=activation), 
             name=f'LSTM{i}'))
     # Hidden Dense layer(s):
     for i in range(n_dense_layers):
-        n_dense_units = hp.Int(f"dense_units_l-{i}", min_value=25, max_value=300, step=1)
-        dropout = hp.Float(f"dropout_dense_l-{i}", min_value=0, max_value=0.9)
+        n_dense_units = hp.Int(f"dense_units_l-{i}", min_value=50, max_value=1000, step=1)
+        dropout = hp.Float(f"dropout_dense_l-{i}", min_value=0, max_value=0.5)
 
         model.add(TimeDistributed(Dense(n_dense_units, 
             activation=activation), name=f'FC_{i}'))
@@ -1004,14 +1023,17 @@ def build_nas_lstm(hp):
         Dense(n_dipoles, activation=activation_out), name='FC_Out')
     )
     model.build(input_shape=input_shape)
-
+    momentum = hp.Float('Momentum', min_value=0, max_value=0.9)
+    nesterov = hp.Choice('Nesterov', [False, True])
+    learning_rate = hp.Choice('learning_rate', [0.01, 0.001])
+    optimizer = hp.Choice("Optimizer", [0,1,2])
+    optimizers = [keras.optimizers.RMSprop(learning_rate=learning_rate, momentum=momentum), keras.optimizers.Adam(learning_rate=learning_rate), keras.optimizers.SGD(learning_rate=learning_rate, nesterov=nesterov)]
     model.compile(
-        optimizer=keras.optimizers.Adam(
-            hp.Float("learning_rate", min_value=0.0005, max_value=0.05,),
-            clipvalue = hp.Float("Clip Value", min_value=0.1, max_value=1)
-        ),
+        optimizer=optimizers[optimizer],
         loss="huber",
-        metrics=["mse", "mae"],
+        # metrics=[tf.keras.metrics.AUC()],
+        # metrics=[evaluate.modified_auc_metric()],
+        metrics=[evaluate.auc],
     )
     return model
 

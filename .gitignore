@@ -3,8 +3,6 @@
 *.stc
 *__pycache__
 
-evaluate.ipynb
-
 dev
 .vscode
 logs
