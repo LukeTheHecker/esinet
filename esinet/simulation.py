@@ -83,6 +83,7 @@ class Simulation:
         self.parallel = parallel
         self.verbose = verbose
         _, _, self.pos, _ = util.unpack_fwd(self.fwd)
+        self.distance_matrix = cdist(self.pos, self.pos)
     
     
     def check_info(self, info):
@@ -95,10 +96,12 @@ class Simulation:
         ''' Simulate sources and EEG data'''
         
         self.n_samples = n_samples
-
+        start = time()
         self.source_data = self.simulate_sources(n_samples)
+        end_source = time()
         self.eeg_data = self.simulate_eeg()
-
+        end_eeg = time()
+        print(f'Source sim: {1000*(end_source-start):.1f} ms\nEEG sim: {1000*(end_eeg-end_source):.1f} ms')
         return self
 
     def plot(self):
@@ -112,9 +115,13 @@ class Simulation:
                 (delayed(self.simulate_source)() 
                 for _ in range(n_samples)))
         else:
-            source_data = np.stack([self.simulate_source() 
-                for _ in tqdm(range(n_samples))], axis=0)
-        
+            n_time = int(self.info['sfreq'] * self.settings['duration_of_trial'])
+            n_dip = self.pos.shape[0]
+            source_data = np.zeros((n_samples, n_dip, n_time))
+            for i in range(n_samples):
+                source_data[i] = self.simulate_source()
+            # source_data = np.stack([self.simulate_source() 
+            #     for _ in tqdm(range(n_samples))], axis=0)
         # Convert to mne.SourceEstimate
         if self.verbose:
             print(f'Converting Source Data to mne.SourceEstimate object')
@@ -123,7 +130,8 @@ class Simulation:
                 sfreq=self.settings['sample_frequency'], subject=self.subject) 
         else:
             sources = self.sources_to_sourceEstimates(source_data)
-
+ 
+        
         return sources
 
     def sources_to_sourceEstimates(self, source_data):
@@ -176,7 +184,6 @@ class Simulation:
         
         ###########################################
         # Select ranges and prepare some variables
-
         # Get number of sources is a range:
         number_of_sources = self.get_from_range(
             self.settings['number_of_sources'], dtype=int)
@@ -230,10 +237,9 @@ class Simulation:
         
         ##############################################
         # Loop through source centers (i.e. seeds of source positions)
-        distance_matrix = cdist(self.pos, self.pos)
         for i, (src_center, shape, amplitude, signal) in enumerate(zip(src_centers, shapes, amplitudes, signals)):
             # dists = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))
-            dists = distance_matrix[src_center]
+            dists = self.distance_matrix[src_center]
             d = np.where(dists<extents[i]/2)[0]
 
             if shape == 'gaussian':
