@@ -101,7 +101,7 @@ class Simulation:
         end_source = time()
         self.eeg_data = self.simulate_eeg()
         end_eeg = time()
-        print(f'Source sim: {1000*(end_source-start):.1f} ms\nEEG sim: {1000*(end_eeg-end_source):.1f} ms')
+        # print(f'Source sim: {1000*(end_source-start):.1f} ms\nEEG sim: {1000*(end_eeg-end_source):.1f} ms')
         return self
 
     def plot(self):
@@ -118,10 +118,8 @@ class Simulation:
             n_time = int(self.info['sfreq'] * self.settings['duration_of_trial'])
             n_dip = self.pos.shape[0]
             source_data = np.zeros((n_samples, n_dip, n_time))
-            for i in range(n_samples):
+            for i in tqdm(range(n_samples)):
                 source_data[i] = self.simulate_source()
-            # source_data = np.stack([self.simulate_source() 
-            #     for _ in tqdm(range(n_samples))], axis=0)
         # Convert to mne.SourceEstimate
         if self.verbose:
             print(f'Converting Source Data to mne.SourceEstimate object')
@@ -321,7 +319,9 @@ class Simulation:
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
         if self.verbose:
             print(f'\nProject sources to EEG...')
+        start = time()
         eeg_clean = self.project_sources(sources)
+        end = time()
 
         if self.verbose:
             print(f'\nCreate EEG trials with noise...')
@@ -331,12 +331,11 @@ class Simulation:
                 target_snrs[sample], betas[sample]) 
                 for sample in tqdm(range(n_samples))), axis=0)
         else:
-            eeg_trials_noisy = np.stack(
-                [self.create_eeg_helper(eeg_clean[sample], n_simulation_trials, 
-                target_snrs[sample], betas[sample]) 
-                for sample in tqdm(range(n_samples))], 
-                axis=0)
-            
+            eeg_trials_noisy = np.zeros((eeg_clean.shape[0], n_simulation_trials, *eeg_clean.shape[1:]))
+            for sample in tqdm(range(n_samples)):
+                eeg_trials_noisy[sample] = self.create_eeg_helper(eeg_clean[sample], 
+                    n_simulation_trials, target_snrs[sample], betas[sample]) 
+             
         if n_simulation_trials == 1 and len(eeg_trials_noisy.shape) == 2:
             # Add empty dimension to contain the single trial
             eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=1)
@@ -434,17 +433,19 @@ class Simulation:
             sources_tmp.shape[1]*sources_tmp.shape[2])
         sources_tmp = sources_tmp.reshape(short_shape)
         # Scale to allow for lower precision
-        scaler = 1/sources_tmp.max()
-        sources_tmp *= scaler
+        # scaler = 1/sources_tmp.max()
+        # sources_tmp *= scaler
         # Perform Matmul
-        result = np.matmul(
-            leadfield.astype(np.float32), sources_tmp.astype(np.float32))
+        # result = np.matmul(
+        #     leadfield.astype(np.float32), sources_tmp.astype(np.float32))
+        result = np.matmul(leadfield, sources_tmp)
+        
         # Reshape result
         result = result.reshape(result.shape[0], n_samples, n_timepoints)
         # swap axes to correct order
         result = np.swapaxes(result,0,1)
         # Rescale
-        result /= scaler
+        # result /= scaler
         return result
 
 

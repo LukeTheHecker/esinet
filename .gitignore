@@ -2,6 +2,8 @@
 *.pkl
 *.stc
 *__pycache__
+*.npy
+*.dil
 
 dev
 .vscode
