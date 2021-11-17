@@ -19,7 +19,7 @@ DEFAULT_SETTINGS = {
             'duration_of_trial': 0,
             'sample_frequency': 100,
             'target_snr': (0.5, 10),
-            'beta': (0, 3),
+            'beta': (0.5, 1.5),  # (0, 3)
         }
 
 class Simulation:
@@ -117,7 +117,7 @@ class Simulation:
         else:
             n_time = int(self.info['sfreq'] * self.settings['duration_of_trial'])
             n_dip = self.pos.shape[0]
-            source_data = np.zeros((n_samples, n_dip, n_time))
+            source_data = np.zeros((n_samples, n_dip, n_time), dtype=np.float32)
             for i in tqdm(range(n_samples)):
                 source_data[i] = self.simulate_source()
         # Convert to mne.SourceEstimate

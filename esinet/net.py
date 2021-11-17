@@ -1,4 +1,5 @@
 import mne
+import os
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -8,6 +9,7 @@ from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional,
 from tensorflow.keras import backend as K
 from keras.layers.core import Lambda
 from scipy.optimize import minimize_scalar
+import pickle as pkl
 import datetime
 # from sklearn import linear_model
 import numpy as np
@@ -188,7 +190,7 @@ class Net:
         # Ensure that the forward model has the same 
         # channels as the eeg object
         self._check_model(eeg)
-
+        print("handle data")
         # Handle EEG input
         eeg = eeg.get_data()
 
@@ -205,7 +207,8 @@ class Net:
         # Extract data
         y = sources
         x = eeg
-
+        
+        print("preprocess data")
         # Prepare data
         # Scale sources
         y_scaled = self.scale_source(y)
@@ -242,7 +245,8 @@ class Net:
         if not self.compiled:
             self.model.compile(optimizer, loss, metrics=metrics)
             self.compiled = True
-
+        
+        print("reshape data")
         if self.temporal:
             # LSTM net expects dimensions to be: (samples, time, channels)
             x_scaled = np.swapaxes(x_scaled,1,2)
@@ -251,7 +255,8 @@ class Net:
             # Squeeze to remove empty time dimension
             x_scaled = np.squeeze(x_scaled)
             y_scaled = np.squeeze(y_scaled)
-
+        
+        print("fit model")
         if device is None:
             history = self.model.fit(x_scaled, y_scaled, 
                 epochs=epochs, batch_size=batch_size, shuffle=True, 
@@ -437,7 +442,6 @@ class Net:
         outsource : either numpy.ndarray (if dtype='raw') or mne.SourceEstimate instance
         '''
         
-        
         eeg, _ = self._handle_data_input(args)
 
         if isinstance(eeg, util.EVOKED_INSTANCES):
@@ -463,7 +467,6 @@ class Net:
         else:
             msg = f'eeg must be of type <mne.EvokedArray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
             raise ValueError(msg)
-        
         # Prepare EEG to ensure common average reference and appropriate scaling
         # eeg_prep =  self._prep_eeg(eeg)
         eeg_prep = self.scale_eeg(eeg)
@@ -473,20 +476,22 @@ class Net:
 
         # Predicted sources all in one go
         predicted_sources = self.predict_sources(eeg_prep)       
-        
+
         # Rescale Predicitons
         # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
         predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
+
+
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
         if predicted_sources.shape[-1] == 1:
             predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[:, :, 0], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)]
         else:    
             predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[k], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)
                     for k in range(predicted_sources_scaled.shape[0])]
+        
 
         if len(predicted_source_estimate) == 1:
             predicted_source_estimate = predicted_source_estimate[0]
-
         return predicted_source_estimate
 
     def predict_sources(self, eeg):
@@ -984,6 +989,50 @@ class Net:
         x_est = np.matmul(leadfield, y_est) 
         error = np.abs(pearsonr(x_true-x_est, x_true)[0])
         return error
+    
+    def save(self, path, name='model'):
+        # get list of folders in path
+        list_of_folders = os.listdir(path)
+        model_ints = []
+        for folder in list_of_folders:
+            full_path = os.path.join(path, folder)
+            if not os.path.isdir(full_path):
+                continue
+            if folder.startswith(name):
+                new_integer = int(folder.split('_')[-1])
+                model_ints.append(new_integer)
+        if len(model_ints) == 0:
+            model_name = f'\\{name}_0'
+        else:
+            model_name = f'\\{name}_{max(model_ints)+1}'
+        new_path = path+model_name
+        os.mkdir(new_path)
+
+        # Save model only
+        self.model.save(new_path)
+        # self.model.save_weights(new_path)
+
+        # copy_model = tf.keras.models.clone_model(self.model)
+        # copy_model.compile(optimizer=tf.keras.optimizers.RMSprop(learning_rate=0.001, momentum=0.35), loss='huber')
+        # copy_model.set_weights(self.model.get_weights())
+
+
+        
+        # Save rest
+        # Delete model since it is not serializable
+        self.model = None
+
+        with open(new_path + '\\instance.pkl', 'wb') as f:
+            pkl.dump(self, f)
+        
+        # Attach model again now that everything is saved
+        self.model = tf.keras.models.load_model(new_path)
+        
+        return self
+
+
+
+
     
 
 def build_nas_lstm(hp):

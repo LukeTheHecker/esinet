@@ -5,9 +5,10 @@ import tensorflow as tf
 from tensorflow.keras import backend as K
 from scipy.spatial.distance import cdist
 from copy import deepcopy
+import time
 
 def get_maxima_mask(y, pos, k_neighbors=5, threshold=0.1, min_dist=30,
-    distance_matrix=None):
+    argsorted_distance_matrix=None):
     ''' Returns the mask containing the source maxima (binary).
     
     Parameters
@@ -22,20 +23,26 @@ def get_maxima_mask(y, pos, k_neighbors=5, threshold=0.1, min_dist=30,
         Proportion between 0 and 1. Defined the minimum value for a maximum to 
         be of significance. 0.1 -> 10% of the absolute maximum
     '''
-    if distance_matrix is None:
-        distance_matrix = cdist(pos, pos)
+    if argsorted_distance_matrix is None:
+        argsorted_distance_matrix = np.argsort(cdist(pos, pos), axis=1)
 
-    mask = np.zeros((len(y)))
+    
     y = np.abs(y)
     threshold = threshold*np.max(y)
-
+    t_start = time.time()
     # find maxima that surpass the threshold:
-    for i, _ in enumerate(y):
-        distances = distance_matrix[i]
-        close_idc = np.argsort(distances)[1:k_neighbors+1]
-        if y[i] > np.max(y[close_idc]) and y[i] > threshold:
-            mask[i] = 1
-
+    close_idc = argsorted_distance_matrix[:, 1:k_neighbors+1]
+    mask = ((y >= np.max(y[close_idc], axis=1)) & (y > threshold)).astype(int)
+    
+    # OLD CODE
+    # mask = np.zeros((len(y)))
+    # for i, _ in enumerate(y):
+    #     distances = distance_matrix[i]
+    #     close_idc = np.argsort(distances)[1:k_neighbors+1]
+    #     if y[i] > np.max(y[close_idc]) and y[i] > threshold:
+    #         mask[i] = 1
+    
+    t_loop1 = time.time()
     # filter maxima
     maxima = np.where(mask==1)[0]
     distance_matrix_maxima = cdist(pos[maxima], pos[maxima])
@@ -45,6 +52,8 @@ def get_maxima_mask(y, pos, k_neighbors=5, threshold=0.1, min_dist=30,
         # If there is a larger maximum in the close vicinity->delete maximum
         if np.max(y[close_maxima]) > y[maxima[i]]:
             mask[maxima[i]] = 0
+    t_loop2 = time.time()
+    
     return mask
     
 def get_maxima_pos(mask, pos):
@@ -59,7 +68,7 @@ def get_maxima_pos(mask, pos):
     return pos[np.where(mask==1)[0]]
 
 def eval_mean_localization_error(y_true, y_est, pos, k_neighbors=5, 
-    min_dist=30, threshold=0.1, ghost_thresh=40, distance_matrix=None):
+    min_dist=30, threshold=0.1, ghost_thresh=40, argsorted_distance_matrix=None):
     ''' Calculate the mean localization error for an arbitrary number of 
     sources.
     
@@ -91,17 +100,20 @@ def eval_mean_localization_error(y_true, y_est, pos, k_neighbors=5,
         The mean localization error between all sources in y_true and the 
         closest matches in y_est.
     '''
+
     y_true = deepcopy(y_true)
     y_est = deepcopy(y_est)
+
+    
     maxima_true = get_maxima_pos(
         get_maxima_mask(y_true, pos, k_neighbors=k_neighbors, 
         threshold=threshold, min_dist=min_dist, 
-        distance_matrix=distance_matrix), pos)
+        argsorted_distance_matrix=argsorted_distance_matrix), pos)
     maxima_est = get_maxima_pos(
         get_maxima_mask(y_est, pos, k_neighbors=k_neighbors,
         threshold=threshold, min_dist=min_dist, 
-        distance_matrix=distance_matrix), pos)
-    
+        argsorted_distance_matrix=argsorted_distance_matrix), pos)
+
     # Distance matrix between every true and estimated maximum
     distance_matrix = cdist(maxima_true, maxima_est)
     # For each true source find the closest predicted source:
@@ -246,6 +258,8 @@ def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
         Area under the curve for dipoles far from source.
     '''
     # Copy
+    t_start = time.time()
+
     y_true = deepcopy(y_true)
     y_est = deepcopy(y_est)
     # Absolute values
@@ -258,7 +272,10 @@ def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
 
     auc_close = np.zeros((n_redraw))
     auc_far = np.zeros((n_redraw))
-
+    
+    t_prep = time.time()
+    print(f'\tprep took {1000*(t_prep-t_start):.1f} ms')
+    
     source_mask = (y_true>epsilon).astype(int)
 
     numberOfActiveSources = int(np.sum(source_mask))
@@ -267,8 +284,17 @@ def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
     closeSplit = int(round(numberOfDipoles / 5))
     # Draw from the 50% of furthest dipoles to sources
     farSplit = int(round(numberOfDipoles / 2))
+    t_prep = time.time()
+    print(f'\tprep took {1000*(t_prep-t_start):.1f} ms')
+
     distSortedIndices = find_indices_close_to_source(source_mask, pos)
+
+    t_prep2 = time.time()
+    print(f'\tprep2 took {1000*(t_prep2-t_prep):.1f} ms')
+
     sourceIndices = np.where(source_mask==1)[0]
+    
+    
   
     
     for n in range(n_redraw):
@@ -285,7 +311,9 @@ def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
     
     auc_far = np.mean(auc_far)
     auc_close = np.mean(auc_close)
-    
+    t_loops = time.time()
+    print(f'\tloops took {1000*(t_loops-t_prep2):.1f} ms')
+  
     if plot_me:
         print("plotting")
         plt.figure()
@@ -321,8 +349,19 @@ def find_indices_close_to_source(source_mask, pos):
     numberOfDipoles = pos.shape[0]
 
     sourceIndices = np.array([i[0] for i in np.argwhere(source_mask==1)])
-    numberOfNans = 0
+    
     min_distance_to_source = np.zeros((numberOfDipoles))
+    
+    
+    # D = np.zeros((numberOfDipoles, len(sourceIndices)))
+    # for i, idx in enumerate(sourceIndices):
+    #     D[:, i] = np.sqrt(np.sum(((pos-pos[idx])**2), axis=1))
+    # min_distance_to_source = np.min(D, axis=1)
+    # min_distance_to_source[source_mask==1] = np.nan
+    # numberOfNans = source_mask.sum()
+    
+    ###OLD
+    numberOfNans = 0
     for i in range(numberOfDipoles):
         if source_mask[i] == 1:
             min_distance_to_source[i] = np.nan
@@ -332,10 +371,11 @@ def find_indices_close_to_source(source_mask, pos):
             min_distance_to_source[i] = np.min(distances)
         else:
             print('source mask has invalid entries')
-    
-    # min_distance_to_source = min_distance_to_source[~np.isnan(min_distance_to_source)]
+    print('new: ', np.nanmean(min_distance_to_source), min_distance_to_source.shape)
+    ###OLD
+
     ordered_indices = np.argsort(min_distance_to_source)
-    # ordered_indices[np.where(~np.isnan(min_distance_to_source[ordered_indices]]
+
     return ordered_indices[:-numberOfNans]
 
 def modified_auc_metric(threshold=0.1, auc_params=dict(name='mod_auc')):
