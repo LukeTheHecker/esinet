@@ -496,3 +496,43 @@ def load_net(path, name='instance'):
         net = pkl.load(f)
     net.model = model
     return net
+
+def create_n_dim_noise(shape, exponent=4):
+    ''' Creates n-dimensional noise of given shape. The frequency spectrum is given 
+    by the exponent, whereas exponent=2 gives pink noise, although exponent=4 looks more like it imo.
+    
+    Parameters
+    ----------
+    shape : tuple
+        Desired shape of the noise
+    exponent : int/float
+        Frequency spectrum
+    
+    '''
+    signal = np.random.uniform(-1, 1, shape)
+    signal_fft = np.fft.fftn(signal, ) / shape[0]
+
+    freqs = [np.sqrt(np.arange(s) + 1) for s in shape]
+    if len(shape) == 1:
+        # pinked_fft = signal_fft / np.sqrt( (freqs[0]**exponent)[np.newaxis, :] )
+        pinked_fft = signal_fft / (freqs[0]**exponent)[np.newaxis, :]
+    elif len(shape) == 2:
+        # pinked_fft = signal_fft / np.sqrt( ((freqs[0]**exponent)[np.newaxis, :]+(freqs[1]**exponent)[:, np.newaxis]) )
+        pinked_fft = signal_fft / ((freqs[0]**exponent)[np.newaxis, :]+(freqs[1]**exponent)[:, np.newaxis])
+    elif len(shape) == 3:
+        # pinked_fft = signal_fft / np.sqrt( ((freqs[0]**exponent)[:, np.newaxis, np.newaxis]+(freqs[1]**exponent)[np.newaxis, :, np.newaxis]+(freqs[2]**exponent)[np.newaxis, np.newaxis, :]))
+        pinked_fft = signal_fft /  ((freqs[0]**exponent)[:, np.newaxis, np.newaxis]+(freqs[1]**exponent)[np.newaxis, :, np.newaxis]+(freqs[2]**exponent)[np.newaxis, np.newaxis, :])
+    elif len(shape) == 4:
+        # pinked_fft = signal_fft / np.sqrt( ((freqs[0]**exponent)[:, np.newaxis, np.newaxis]+(freqs[1]**exponent)[np.newaxis, :, np.newaxis]+(freqs[2]**exponent)[np.newaxis, np.newaxis, :]))
+        pinked_fft = signal_fft /  ((freqs[0]**exponent)[:, np.newaxis, np.newaxis, np.newaxis]+(freqs[1]**exponent)[np.newaxis, :, np.newaxis, np.newaxis]+(freqs[2]**exponent)[np.newaxis, np.newaxis, :, np.newaxis]+(freqs[3]**exponent)[np.newaxis, np.newaxis, np.newaxis, :])
+    pink = np.fft.ifftn(pinked_fft).real
+    return np.squeeze(pink)
+
+def vol_to_src(neighbor_indices, src_3d, pos):
+    '''Interpolate a 3D source to a irregular grid using k-nearest 
+    neighbor interpolation.
+    '''
+    src_3d_flat = src_3d.flatten()
+    src = src_3d_flat[neighbor_indices].mean(axis=-1)
+
+    return src 

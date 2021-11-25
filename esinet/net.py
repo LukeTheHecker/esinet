@@ -388,11 +388,19 @@ class Net:
         '''
         eeg_out = deepcopy(eeg)
         # Common average ref & unit variance
+        # for sample in range(eeg.shape[0]):
+        #     for time in range(eeg.shape[2]):
+        #         eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
+        #         eeg_out[sample, :, time] /= eeg_out[sample, :, time].std()
+        
+        # Common average ref & min-max scaling
+        minimum, maximum = [np.min(eeg), np.max(eeg)]
+        eeg_out = (eeg_out-minimum) / (maximum-minimum)
         for sample in range(eeg.shape[0]):
             for time in range(eeg.shape[2]):
                 eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
-                eeg_out[sample, :, time] /= eeg_out[sample, :, time].std()
         
+
         # Normalize
         # for sample in range(eeg.shape[0]):
         #     eeg[sample] /= eeg[sample].std()
@@ -416,8 +424,8 @@ class Net:
         source_out = deepcopy(source)
         for sample in range(source.shape[0]):
             for time in range(source.shape[2]):
-                source_out[sample, :, time] /= source_out[sample, :, time].std()
-                # source_out[sample, :, time] /= np.max(np.abs(source_out[sample, :, time]))
+                # source_out[sample, :, time] /= source_out[sample, :, time].std()
+                source_out[sample, :, time] /= np.max(np.abs(source_out[sample, :, time]))
 
         return source_out
             

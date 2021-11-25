@@ -2,7 +2,8 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
-import pickle as pkl
+# import pickle as pkl
+import dill as pkl
 import random
 from joblib import Parallel, delayed
 from tqdm.notebook import tqdm
@@ -12,15 +13,16 @@ from time import time
 from . import util
 
 DEFAULT_SETTINGS = {
-            'number_of_sources': (1, 20),
-            'extents': (1, 50),
-            'amplitudes': (1, 10),
-            'shapes': 'both',
-            'duration_of_trial': 0,
-            'sample_frequency': 100,
-            'target_snr': (0.5, 10),
-            'beta': (0.5, 1.5),  # (0, 3)
-        }
+    'method': 'standard',
+    'number_of_sources': (1, 10),
+    'extents':  lambda: ((np.random.randn(1)/3.2)+17.2)[0], # (1, 50),
+    'amplitudes': (1, 10),
+    'shapes': 'both',
+    'duration_of_trial': 1,
+    'sample_frequency': 100,
+    'target_snr': (2, 20),
+    'beta': (0.5, 1.5),  # (0, 3)
+}
 
 class Simulation:
     ''' Simulate and hold source and M/EEG data.
@@ -67,9 +69,9 @@ class Simulation:
     '''
     def __init__(self, fwd, info, settings=DEFAULT_SETTINGS, n_jobs=-1, 
         parallel=False, verbose=False):
-        settings['sample_frequency'] = info['sfreq']
         self.settings = settings
         self.check_settings()
+        self.settings['sample_frequency'] = info['sfreq']
 
         self.source_data = None
         self.eeg_data = None
@@ -96,18 +98,20 @@ class Simulation:
         ''' Simulate sources and EEG data'''
         
         self.n_samples = n_samples
-        start = time()
         self.source_data = self.simulate_sources(n_samples)
-        end_source = time()
         self.eeg_data = self.simulate_eeg()
-        end_eeg = time()
-        # print(f'Source sim: {1000*(end_source-start):.1f} ms\nEEG sim: {1000*(end_eeg-end_source):.1f} ms')
+
         return self
 
     def plot(self):
         pass
     
     def simulate_sources(self, n_samples):
+
+        n_time = np.clip(int(self.info['sfreq'] * self.settings['duration_of_trial']), a_min=1, a_max=np.inf).astype(int)
+        n_dip = self.pos.shape[0]
+        source_data = np.zeros((n_samples, n_dip, n_time), dtype=np.float32)
+
         if self.verbose:
                 print(f'Simulate Source')
         if self.parallel:
@@ -115,11 +119,15 @@ class Simulation:
                 (delayed(self.simulate_source)() 
                 for _ in range(n_samples)))
         else:
-            n_time = int(self.info['sfreq'] * self.settings['duration_of_trial'])
-            n_dip = self.pos.shape[0]
-            source_data = np.zeros((n_samples, n_dip, n_time), dtype=np.float32)
-            for i in tqdm(range(n_samples)):
-                source_data[i] = self.simulate_source()
+            if self.settings["method"] == "standard":
+                for i in tqdm(range(n_samples)):
+                    source_data[i] = self.simulate_source()
+                
+            elif self.settings["method"] == "noise":
+                print("doing the noise-based source simulation thing")
+                self.prepare_grid()
+                for i in tqdm(range(n_samples)):
+                    source_data[i] = self.simulate_source_noise(n_time)
         # Convert to mne.SourceEstimate
         if self.verbose:
             print(f'Converting Source Data to mne.SourceEstimate object')
@@ -128,10 +136,46 @@ class Simulation:
                 sfreq=self.settings['sample_frequency'], subject=self.subject) 
         else:
             sources = self.sources_to_sourceEstimates(source_data)
- 
         
         return sources
 
+    def prepare_grid(self):
+        n = 10
+        n_time = np.clip(int(self.info['sfreq'] * self.settings['duration_of_trial']), a_min=1, a_max=np.inf).astype(int)
+        shape = (n,n,n,n_time)
+        
+        x = np.linspace(self.pos[:, 0].min(), self.pos[:, 0].max(), num=shape[0])
+        y = np.linspace(self.pos[:, 1].min(), self.pos[:, 1].max(), num=shape[1])
+        z = np.linspace(self.pos[:, 2].min(), self.pos[:, 2].max(), num=shape[2])
+        k_neighbors = 5
+        grid = np.stack(np.meshgrid(x,y,z, indexing='ij'), axis=0)
+        grid_flat = grid.reshape(grid.shape[0], np.product(grid.shape[1:])).T
+        neighbor_indices = np.stack([
+            np.argsort(np.sqrt(np.sum((grid_flat - coords)**2, axis=1)))[:k_neighbors] for coords in self.pos
+        ], axis=0)
+
+        self.grid = {
+            "shape": shape,
+            "k_neighbors": k_neighbors,
+            "exponent": 5,
+            "x": x,
+            "y": y,
+            "z": z,
+            "grid": grid,
+            "grid_flat": grid_flat,
+            "neighbor_indices": neighbor_indices
+        }
+        
+
+    def simulate_source_noise(self, n_time):
+        src_3d = util.create_n_dim_noise(self.grid["shape"], exponent=self.grid["exponent"])
+        if len(src_3d.shape) == 3:
+            src_3d = src_3d[:,:,:,np.newaxis]
+        src = np.zeros((1284, n_time))
+        for i in range(n_time):
+            src[:, i] = util.vol_to_src(self.grid["neighbor_indices"], src_3d[:, :, :, i], self.pos)
+        return src
+        
     def sources_to_sourceEstimates(self, source_data):
         template = util.source_to_sourceEstimate(source_data[0], 
                     self.fwd, sfreq=self.settings['sample_frequency'], 
@@ -303,11 +347,13 @@ class Simulation:
         if len(sources.shape) < 3:
             # ...add empty temporal dimension
             sources = np.expand_dims(sources, axis=2)
+        
+        
 
         # Load some forward model objects
         fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
         n_elec = leadfield.shape[0]
-        n_samples, _, _ = sources.shape
+        n_samples = np.clip(sources.shape[0], a_min=1, a_max=np.inf).astype(int)
 
         target_snrs = [self.get_from_range(self.settings['target_snr'], dtype=float) for _ in range(n_samples)]
         betas = [self.get_from_range(self.settings['beta'], dtype=float) for _ in range(n_samples)]
@@ -319,9 +365,7 @@ class Simulation:
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
         if self.verbose:
             print(f'\nProject sources to EEG...')
-        start = time()
         eeg_clean = self.project_sources(sources)
-        end = time()
 
         if self.verbose:
             print(f'\nCreate EEG trials with noise...')
@@ -332,6 +376,7 @@ class Simulation:
                 for sample in tqdm(range(n_samples))), axis=0)
         else:
             eeg_trials_noisy = np.zeros((eeg_clean.shape[0], n_simulation_trials, *eeg_clean.shape[1:]))
+            
             for sample in tqdm(range(n_samples)):
                 eeg_trials_noisy[sample] = self.create_eeg_helper(eeg_clean[sample], 
                     n_simulation_trials, target_snrs[sample], betas[sample]) 
@@ -483,6 +528,8 @@ class Simulation:
         ''' Check if settings are complete and insert missing 
             entries if there are any.
         '''
+        if self.settings is None:
+            self.settings = DEFAULT_SETTINGS
         # Check for wrong keys:
         for key in self.settings.keys():
             if not key in DEFAULT_SETTINGS.keys():
@@ -532,6 +579,10 @@ class Simulation:
         out : int/float
 
         '''
+        # If input is a function -> call it and return the result
+        if callable(val):
+            return val()
+
         if dtype==int:
             rng = random.randrange
         elif dtype==float:
