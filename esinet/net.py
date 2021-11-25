@@ -53,8 +53,8 @@ class Net:
     evaluate : evaluate the performance of the model
     '''
     
-    def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=1, 
-        n_dense_units=100, n_lstm_units=100, activation_function='swish', 
+    def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
+        n_dense_units=100, n_lstm_units=75, activation_function='relu', 
         n_jobs=-1, model_type='auto', verbose=True):
 
         self._embed_fwd(fwd)
@@ -65,7 +65,7 @@ class Net:
         self.n_lstm_units = n_lstm_units
         self.activation_function = activation_function
         # self.default_loss = tf.keras.losses.Huber(delta=delta)
-        self.default_loss = losses.weighted_huber_loss
+        self.default_loss = 'mean_squared_error'  # losses.weighted_huber_loss
         # self.parallel = parallel
         self.n_jobs = n_jobs
         self.model_type = model_type
@@ -226,13 +226,13 @@ class Net:
         else:
             callbacks = [es]
         if optimizer is None:
-            # optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
             # optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
-            optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate,
+            # optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate,
                 momentum=0.35)
         if loss is None:
             # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
-            loss = 'huber'
+            loss = 'mean_squared_error'
 
 
         elif type(loss) == list:

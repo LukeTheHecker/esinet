@@ -4,13 +4,16 @@
 *__pycache__
 *.npy
 *.dil
+*.gz
+*.png
+*.pptx
 
 dev
 .vscode
 logs
 notes
 env
-evaluate
+evaluate/figures
 keras-tuner
 build
 .pytest_cache
