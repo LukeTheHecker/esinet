@@ -1,11 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import auc, roc_curve
+import tensorflow as tf
+from tensorflow.keras import backend as K
 from scipy.spatial.distance import cdist
 from copy import deepcopy
+import time
 
 def get_maxima_mask(y, pos, k_neighbors=5, threshold=0.1, min_dist=30,
-    distance_matrix=None):
+    argsorted_distance_matrix=None):
     ''' Returns the mask containing the source maxima (binary).
     
     Parameters
@@ -20,20 +23,26 @@ def get_maxima_mask(y, pos, k_neighbors=5, threshold=0.1, min_dist=30,
         Proportion between 0 and 1. Defined the minimum value for a maximum to 
         be of significance. 0.1 -> 10% of the absolute maximum
     '''
-    if distance_matrix is None:
-        distance_matrix = cdist(pos, pos)
+    if argsorted_distance_matrix is None:
+        argsorted_distance_matrix = np.argsort(cdist(pos, pos), axis=1)
 
-    mask = np.zeros((len(y)))
+    
     y = np.abs(y)
     threshold = threshold*np.max(y)
-
+    t_start = time.time()
     # find maxima that surpass the threshold:
-    for i, _ in enumerate(y):
-        distances = distance_matrix[i]
-        close_idc = np.argsort(distances)[1:k_neighbors+1]
-        if y[i] > np.max(y[close_idc]) and y[i] > threshold:
-            mask[i] = 1
-
+    close_idc = argsorted_distance_matrix[:, 1:k_neighbors+1]
+    mask = ((y >= np.max(y[close_idc], axis=1)) & (y > threshold)).astype(int)
+    
+    # OLD CODE
+    # mask = np.zeros((len(y)))
+    # for i, _ in enumerate(y):
+    #     distances = distance_matrix[i]
+    #     close_idc = np.argsort(distances)[1:k_neighbors+1]
+    #     if y[i] > np.max(y[close_idc]) and y[i] > threshold:
+    #         mask[i] = 1
+    
+    t_loop1 = time.time()
     # filter maxima
     maxima = np.where(mask==1)[0]
     distance_matrix_maxima = cdist(pos[maxima], pos[maxima])
@@ -43,6 +52,8 @@ def get_maxima_mask(y, pos, k_neighbors=5, threshold=0.1, min_dist=30,
         # If there is a larger maximum in the close vicinity->delete maximum
         if np.max(y[close_maxima]) > y[maxima[i]]:
             mask[maxima[i]] = 0
+    t_loop2 = time.time()
+    
     return mask
     
 def get_maxima_pos(mask, pos):
@@ -57,7 +68,7 @@ def get_maxima_pos(mask, pos):
     return pos[np.where(mask==1)[0]]
 
 def eval_mean_localization_error(y_true, y_est, pos, k_neighbors=5, 
-    min_dist=30, threshold=0.1, ghost_thresh=40, distance_matrix=None):
+    min_dist=30, threshold=0.1, ghost_thresh=40, argsorted_distance_matrix=None):
     ''' Calculate the mean localization error for an arbitrary number of 
     sources.
     
@@ -89,17 +100,20 @@ def eval_mean_localization_error(y_true, y_est, pos, k_neighbors=5,
         The mean localization error between all sources in y_true and the 
         closest matches in y_est.
     '''
+
     y_true = deepcopy(y_true)
     y_est = deepcopy(y_est)
+
+    
     maxima_true = get_maxima_pos(
         get_maxima_mask(y_true, pos, k_neighbors=k_neighbors, 
         threshold=threshold, min_dist=min_dist, 
-        distance_matrix=distance_matrix), pos)
+        argsorted_distance_matrix=argsorted_distance_matrix), pos)
     maxima_est = get_maxima_pos(
         get_maxima_mask(y_est, pos, k_neighbors=k_neighbors,
         threshold=threshold, min_dist=min_dist, 
-        distance_matrix=distance_matrix), pos)
-    
+        argsorted_distance_matrix=argsorted_distance_matrix), pos)
+
     # Distance matrix between every true and estimated maximum
     distance_matrix = cdist(maxima_true, maxima_est)
     # For each true source find the closest predicted source:
@@ -219,18 +233,33 @@ def eval_nmse(y_true, y_est):
     y_est_normed = y_est / np.max(np.abs(y_est))
     return np.mean((y_true_normed-y_est_normed)**2)
 
-def eval_auc(y_true, y_est, pos, n_redraw = 25, epsilon=0.05, plot_me=False):
+def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
     ''' Returns the area under the curve metric between true and predicted
     source. 
+
     Parameters
     ----------
-    y_true : numpy.ndarray True source vector y_est : numpy.ndarray Estimated
-        source vector pos : numpy.ndarray Dipole positions (points x dims)
-        n_redraw : int Defines how often the negative samples are redrawn.
-        epsilon : float Defines threshold on which sources are considered
+    y_true : numpy.ndarray
+        True source vector 
+    y_est : numpy.ndarray
+        Estimated source vector 
+    pos : numpy.ndarray
+        Dipole positions (points x dims)
+    n_redraw : int
+        Defines how often the negative samples are redrawn.
+    epsilon : float
+        Defines threshold on which sources are considered
         active.
+    Return
+    ------
+    auc_close : float
+        Area under the curve for dipoles close to source.
+    auc_far : float
+        Area under the curve for dipoles far from source.
     '''
     # Copy
+    t_start = time.time()
+
     y_true = deepcopy(y_true)
     y_est = deepcopy(y_est)
     # Absolute values
@@ -243,7 +272,10 @@ def eval_auc(y_true, y_est, pos, n_redraw = 25, epsilon=0.05, plot_me=False):
 
     auc_close = np.zeros((n_redraw))
     auc_far = np.zeros((n_redraw))
-
+    
+    t_prep = time.time()
+    print(f'\tprep took {1000*(t_prep-t_start):.1f} ms')
+    
     source_mask = (y_true>epsilon).astype(int)
 
     numberOfActiveSources = int(np.sum(source_mask))
@@ -252,8 +284,17 @@ def eval_auc(y_true, y_est, pos, n_redraw = 25, epsilon=0.05, plot_me=False):
     closeSplit = int(round(numberOfDipoles / 5))
     # Draw from the 50% of furthest dipoles to sources
     farSplit = int(round(numberOfDipoles / 2))
+    t_prep = time.time()
+    print(f'\tprep took {1000*(t_prep-t_start):.1f} ms')
+
     distSortedIndices = find_indices_close_to_source(source_mask, pos)
+
+    t_prep2 = time.time()
+    print(f'\tprep2 took {1000*(t_prep2-t_prep):.1f} ms')
+
     sourceIndices = np.where(source_mask==1)[0]
+    
+    
   
     
     for n in range(n_redraw):
@@ -270,7 +311,9 @@ def eval_auc(y_true, y_est, pos, n_redraw = 25, epsilon=0.05, plot_me=False):
     
     auc_far = np.mean(auc_far)
     auc_close = np.mean(auc_close)
-    
+    t_loops = time.time()
+    print(f'\tloops took {1000*(t_loops-t_prep2):.1f} ms')
+  
     if plot_me:
         print("plotting")
         plt.figure()
@@ -288,18 +331,37 @@ def eval_auc(y_true, y_est, pos, n_redraw = 25, epsilon=0.05, plot_me=False):
 
 def find_indices_close_to_source(source_mask, pos):
     ''' Finds the dipole indices that are closest to the active sources. 
-    Parameters:
+
+    Parameters
     -----------
-    simSettings : dict, retrieved from the simulate_source function
-    pos : numpy.ndarray, list of all dipole positions in XYZ coordinates
-    Return:
+    simSettings : dict
+        retrieved from the simulate_source function
+    pos : numpy.ndarray
+        list of all dipole positions in XYZ coordinates
+
+    Return
     -------
-    ordered_indices : numpy.ndarray, ordered list of dipoles that are near active sources in ascending order with respect to their distance to         the next source.'''
+    ordered_indices : numpy.ndarray
+        ordered list of dipoles that are near active 
+        sources in ascending order with respect to their distance to the next source.
+    '''
+
     numberOfDipoles = pos.shape[0]
 
     sourceIndices = np.array([i[0] for i in np.argwhere(source_mask==1)])
-    numberOfNans = 0
+    
     min_distance_to_source = np.zeros((numberOfDipoles))
+    
+    
+    # D = np.zeros((numberOfDipoles, len(sourceIndices)))
+    # for i, idx in enumerate(sourceIndices):
+    #     D[:, i] = np.sqrt(np.sum(((pos-pos[idx])**2), axis=1))
+    # min_distance_to_source = np.min(D, axis=1)
+    # min_distance_to_source[source_mask==1] = np.nan
+    # numberOfNans = source_mask.sum()
+    
+    ###OLD
+    numberOfNans = 0
     for i in range(numberOfDipoles):
         if source_mask[i] == 1:
             min_distance_to_source[i] = np.nan
@@ -309,11 +371,144 @@ def find_indices_close_to_source(source_mask, pos):
             min_distance_to_source[i] = np.min(distances)
         else:
             print('source mask has invalid entries')
-    
-    # min_distance_to_source = min_distance_to_source[~np.isnan(min_distance_to_source)]
+    print('new: ', np.nanmean(min_distance_to_source), min_distance_to_source.shape)
+    ###OLD
+
     ordered_indices = np.argsort(min_distance_to_source)
-    # ordered_indices[np.where(~np.isnan(min_distance_to_source[ordered_indices]]
+
     return ordered_indices[:-numberOfNans]
+
+def modified_auc_metric(threshold=0.1, auc_params=dict(name='mod_auc')):
+    ''' AUC metric suitable as a loss function or metric for tensorflow/keras
+    Parameters
+    ----------
+    '''
+    def abs_scale(x):
+        ''' Take absolute values and scale them to max=1
+        '''
+        x = K.abs(x)
+        x = x / tf.expand_dims(K.max(x, axis=-1), axis=-1)
+        return x
+
+    def auc_loss(y_true, y_pred):
+        # y_true_s, y_pred_s = [y_true, y_pred]
+
+        # Take Abs values
+        y_true = abs_scale(y_true)
+        y_pred = abs_scale(y_pred)
+        
+        # Binarize Ground truth    
+        y_true = y_true > threshold
+
+        # Calc AUC
+        auc = tf.keras.metrics.AUC(**auc_params)(y_true, y_pred)
+        return auc
+    return auc_loss
+
+def abs_scale(x):
+    ''' Take absolute values and scale them to max=1
+    '''
+    x = K.abs(x)
+    x = x / tf.expand_dims(K.max(x, axis=-1), axis=-1)
+    return x
+
+
+def get_tpr_fpr(y_true, threshold_vector):
+    true_positive = np.equal(threshold_vector, 1) & np.equal(y_true, 1)
+    true_negative = np.equal(threshold_vector, 0) & np.equal(y_true, 0)
+    false_positive = np.equal(threshold_vector, 1) & np.equal(y_true, 0)
+    false_negative = np.equal(threshold_vector, 0) & np.equal(y_true, 1)
+
+    tpr = true_positive.sum() / (true_positive.sum() + false_negative.sum())
+    fpr = false_positive.sum() / (false_positive.sum() + true_negative.sum())
+
+    return tpr, fpr
+
+def auc_metric(y_true, y_pred, n_thresholds=200, epsilon=0.1):
+    if len(y_true.shape) == 1:
+        y_true = np.expand_dims(y_true, axis=0)
+        y_pred = np.expand_dims(y_pred, axis=0)
+    if len(y_true.shape) > 2:
+        old_dim = y_true.shape
+        y_true = y_true.reshape(np.prod(y_true.shape[:-1]), y_true.shape[-1])
+        y_pred = y_pred.reshape(np.prod(y_pred.shape[:-1]), y_pred.shape[-1])
+    
+    aucs = []
+    thresholds = np.linspace(0, 1, num=n_thresholds)
+    for y_true_, y_pred_ in zip(y_true, y_pred):
+        
+        # Absolute and scaling
+        y_true_ = np.abs(y_true_) / np.max(np.abs(y_true_))
+        y_pred_ = np.abs(y_pred_) / np.max(np.abs(y_pred_))
+        
+        y_true_ = (y_true_ > epsilon).astype(int)
+
+        fpr_vec = []
+        tpr_vec = []
+        for i in range(n_thresholds):
+            threshold_vector = (y_pred_ >= thresholds[i]).astype(int)
+            
+            tpr, fpr = get_tpr_fpr(y_true_, threshold_vector)
+            fpr_vec.append(fpr)
+            tpr_vec.append(tpr)
+        auc = np.abs(np.trapz(tpr_vec, x=fpr_vec))
+        aucs.append( auc )
+        # plt.figure()
+        # plt.plot(fpr_vec, tpr_vec)
+        # plt.ylabel('True-positive Rate')
+        # plt.xlabel('False-positive Rate')
+        # plt.title(f'AUC: {auc:.2f}')
+
+    return np.mean(aucs)
+
+def tf_get_tpr_fpr(y_true, threshold_vector):
+    true_positive = tf.cast(tf.math.equal(threshold_vector, 1) & tf.math.equal(y_true, 1), tf.int32)
+    true_negative = tf.cast(tf.math.equal(threshold_vector, 0) & tf.math.equal(y_true, 0), tf.int32)
+    false_positive = tf.cast(tf.math.equal(threshold_vector, 1) & tf.math.equal(y_true, 0), tf.int32)
+    false_negative = tf.cast(tf.math.equal(threshold_vector, 0) & tf.math.equal(y_true, 1), tf.int32)
+
+    tpr = K.sum(true_positive) / (K.sum(true_positive) + K.sum(false_negative))
+    fpr = K.sum(false_positive) / (K.sum(false_positive) + K.sum(true_negative))
+
+    return tpr, fpr
+
+def tf_auc_metric(y_true, y_pred, n_thresholds=200, epsilon=0.1):
+    if len(y_true.shape) == 1:
+        y_true = tf.expand_dims(y_true, axis=0)
+        y_pred = tf.expand_dims(y_pred, axis=0)
+    if len(y_true.shape) > 2:
+        old_dim = y_true.shape
+        y_true = tf.reshape(y_true, (tf.math.reduce_prod(y_true.shape[:-1]), y_true.shape[-1]))
+        y_pred = tf.reshape(y_pred, (tf.math.reduce_prod(y_pred.shape[:-1]), y_pred.shape[-1]))
+    
+    aucs = []
+    thresholds = tf.linspace(0, 1, num=n_thresholds)
+    for y_true_, y_pred_ in zip(y_true, y_pred):
+        print('go next')
+        # Absolute and scaling
+        y_true_ = K.abs(y_true_) / K.max(K.abs(y_true_))
+        y_pred_ = K.abs(y_pred_) / K.max(K.abs(y_pred_))
+        
+        y_true_ = tf.cast(y_true_ > epsilon, tf.int32)
+
+        fpr_vec = []
+        tpr_vec = []
+        for i in range(n_thresholds):
+            threshold_vector = tf.cast(y_pred_ >= thresholds[i], tf.int32)
+            
+            tpr, fpr = tf_get_tpr_fpr(y_true_, threshold_vector)
+            fpr_vec.append(fpr)
+            tpr_vec.append(tpr)
+        auc = np.abs(np.trapz(tpr_vec, x=fpr_vec))
+        print(tpr_vec)
+        aucs.append( auc )
+        # plt.figure()
+        # plt.plot(fpr_vec, tpr_vec)
+        # plt.ylabel('True-positive Rate')
+        # plt.xlabel('False-positive Rate')
+        # plt.title(f'AUC: {auc:.2f}')
+
+    return K.mean(aucs)
 
 # import numpy as np
 # from esinet.evaluate import eval_auc

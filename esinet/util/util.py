@@ -3,6 +3,8 @@ import mne
 import numpy as np
 import os
 from copy import deepcopy
+import logging
+from time import time
 from .. import simulation
 from .. import net
 
@@ -70,19 +72,21 @@ def source_to_sourceEstimate(data, fwd, sfreq=1, subject='fsaverage',
     src : mne.SourceEstimate, instance of SourceEstimate.
 
     '''
+    
     data = np.squeeze(np.array(data))
     if len(data.shape) == 1:
         data = np.expand_dims(data, axis=1)
-
+    
     source_model = fwd['src']
-    number_of_dipoles = unpack_fwd(fwd)[1].shape[1]
+    number_of_dipoles = int(fwd['src'][0]['nuse']+fwd['src'][1]['nuse'])
+    
     if data.shape[0] != number_of_dipoles:
         data = np.transpose(data)
 
     vertices = [source_model[0]['vertno'], source_model[1]['vertno']]
     src = mne.SourceEstimate(data, vertices, tmin=tmin, tstep=1/sfreq, 
         subject=subject)
-
+    
     if simulationInfo is not None:
         setattr(src, 'simulationInfo', simulationInfo)
 
@@ -305,7 +309,7 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0),
     batch_size : int
         The number of samples to simultaneously calculate the error 
         during backpropagation.
-    loss : tf.kers.losses
+    loss : tf.keras.losses
         The loss function.
     false_positive_penalty : float
         Defines weighting of false-positive predictions. Increase for conservative 
@@ -364,23 +368,54 @@ def get_eeg_from_source(stc, fwd, info, tmin=-0.2):
 
     return mne.EvokedArray(eeg_hat, info, tmin=tmin)
 
-def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, ):
+def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, verbose=0):
     ''' Quickly compute inverse solution using MNE methods
     '''
-    method = "eLORETA"
-    lambda2 = 1. / snr ** 2
+
+    epochs.set_eeg_reference(projection=True, verbose=verbose).apply_baseline(baseline=(None, None), verbose=verbose)
     
     evoked = epochs.average()
-    noise_cov = mne.compute_covariance(epochs, tmax=tmax, 
-        method=['shrunk', 'empirical'], rank=None, verbose=False)
+    raw = mne.io.RawArray(evoked.data, evoked.info, verbose=verbose)
+    
+    
+    if method.lower()=='beamformer' or method.lower()=='lcmv' or method.lower()=='beamforming':
+        noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
+        # noise_cov = mne.compute_covariance(epochs, method='empirical', verbose=verbose)
+        # noise_cov = mne.compute_raw_covariance(raw, tmin=None, method='empirical', verbose=verbose)
+        # noise_cov = mne.cov.regularize(noise_cov, raw.info, verbose=verbose)
 
-    inverse_operator = mne.minimum_norm.make_inverse_operator(
-        evoked.info, fwd, noise_cov, loose='auto', depth=None, fixed=True, 
-        verbose=False)
+        data_cov = mne.compute_covariance(epochs, method='empirical', verbose=verbose)
+        # data_cov = mne.compute_raw_covariance(raw, method='empirical', verbose=verbose)
+        # data_cov = mne.cov.regularize(data_cov, raw.info, verbose=verbose)
         
-    stc_elor, residual = mne.minimum_norm.apply_inverse(epochs.average(), inverse_operator, lambda2,
-                                method=method, return_residual=True, verbose=False)
-    return stc_elor
+        lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm='nai', noise_cov=noise_cov, verbose=verbose)
+        # stc = mne.beamformer.apply_lcmv_raw(raw, lcmv_filter, verbose=verbose)
+        stc = mne.beamformer.apply_lcmv(evoked, lcmv_filter, verbose=verbose)
+    else:
+        noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
+        # noise_cov = mne.cov.regularize(noise_cov, raw.info, verbose=verbose)
+        lambda2 = 1. / snr ** 2
+        inverse_operator = mne.minimum_norm.make_inverse_operator(
+            evoked.info, fwd, noise_cov, loose='auto', depth=None, fixed=True, 
+            verbose=verbose)
+            
+        stc = mne.minimum_norm.apply_inverse(evoked, inverse_operator, lambda2,
+                                    method=method, return_residual=False, verbose=verbose)
+    return stc
+
+def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, tmax=0):
+    ''' Wrapper that calculates inverse solutions to a bunch of simulated
+        samples of a esinet.Simulation object
+    '''
+    eeg, sources = net.Net._handle_data_input((sim,))
+    n_samples = eeg.get_data().shape[0]
+    stcs = []
+
+    for i in range(n_samples):
+        stc = mne_inverse(fwd, eeg[i], method=method, snr=snr, tmax=tmax)
+        stcs.append(stc)
+    return stcs
+
 
 def convert_simulation_temporal_to_single(sim):
     sim_single = deepcopy(sim)
@@ -417,3 +452,47 @@ def collapse(x):
         Three-dimensional matrix, e.g. (samples x dipoles x timepoints)
     '''
     return np.swapaxes(x, 1,2).reshape(int(x.shape[0]*x.shape[2]), x.shape[1])
+
+def custom_logger(logger_name, level=logging.DEBUG):
+    """
+    Creates a new log file to log to.
+    
+    Parameters
+    ----------
+    logger_name : str
+        Name or path of the logger
+    level : see logging module for further information
+    
+    Return
+    ------
+    logger : logging.getLogger 
+        Logger handle
+
+    Example
+    -------
+    logger1 = custom_logger('path_to_logger/mylogfile')
+    logger1.info('Here is some info written to the file')
+
+    logger2 = custom_logger('path_to_logger/mylogfile2')
+    logger2.info('Here is some different info written to the file')
+
+    
+    """
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(level)
+    format_string = ("%(asctime)s — %(levelname)s: "
+                    "%(message)s")
+    log_format = logging.Formatter(format_string)
+
+    file_handler = logging.FileHandler(logger_name, mode='a')
+    file_handler.setFormatter(log_format)
+    logger.addHandler(file_handler)
+    return logger
+
+def load_net(path, name='instance'):
+    import tensorflow as tf
+    model = tf.keras.models.load_model(path)
+    with open(path + f'\\{name}.pkl', 'rb') as f:
+        net = pkl.load(f)
+    net.model = model
+    return net

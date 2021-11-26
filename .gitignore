@@ -2,14 +2,15 @@
 *.pkl
 *.stc
 *__pycache__
-
-evaluate.ipynb
+*.npy
+*.dil
 
 dev
 .vscode
 logs
 notes
 env
+evaluate
 keras-tuner
 build
 .pytest_cache

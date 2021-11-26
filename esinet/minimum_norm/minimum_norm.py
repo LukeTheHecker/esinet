@@ -47,3 +47,12 @@ def calc_eloreta_D(leadfield, tikhonov, stopCrit=0.005, verbose=False):
     if verbose:
         print('\t...done!')
     return D, C
+
+def mne_eloreta(sim):
+    ''' Calculates the inverse solution based on the sim object.
+    '''
+    eeg, sources = Net._handle_data_input((sim,))
+    print(eeg, sources)
+    print(eeg[0].get_data().shape)
+
+    pass

@@ -1,4 +1,5 @@
 import mne
+import os
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -8,6 +9,7 @@ from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional,
 from tensorflow.keras import backend as K
 from keras.layers.core import Lambda
 from scipy.optimize import minimize_scalar
+import pickle as pkl
 import datetime
 # from sklearn import linear_model
 import numpy as np
@@ -16,6 +18,7 @@ from copy import deepcopy
 from time import time
 
 from . import util
+from . import evaluate
 from . import losses
 from .custom_layers import BahdanauAttention, Attention
 
@@ -82,8 +85,9 @@ class Net:
         self.leadfield = leadfield
         self.n_channels = leadfield.shape[0]
         self.n_dipoles = leadfield.shape[1]
-        
-    def _handle_data_input(self, arguments):
+    
+    @staticmethod
+    def _handle_data_input(arguments):
         ''' Handles data input to the functions fit() and predict().
         
         Parameters
@@ -186,7 +190,7 @@ class Net:
         # Ensure that the forward model has the same 
         # channels as the eeg object
         self._check_model(eeg)
-
+        print("handle data")
         # Handle EEG input
         eeg = eeg.get_data()
 
@@ -203,7 +207,8 @@ class Net:
         # Extract data
         y = sources
         x = eeg
-
+        
+        print("preprocess data")
         # Prepare data
         # Scale sources
         y_scaled = self.scale_source(y)
@@ -222,11 +227,12 @@ class Net:
             callbacks = [es]
         if optimizer is None:
             # optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            print('clip clap')
-            optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
+            # optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
+            optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate,
+                momentum=0.35)
         if loss is None:
             # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
-            loss = 'mse'
+            loss = 'huber'
 
 
         elif type(loss) == list:
@@ -239,7 +245,8 @@ class Net:
         if not self.compiled:
             self.model.compile(optimizer, loss, metrics=metrics)
             self.compiled = True
-
+        
+        print("reshape data")
         if self.temporal:
             # LSTM net expects dimensions to be: (samples, time, channels)
             x_scaled = np.swapaxes(x_scaled,1,2)
@@ -248,7 +255,8 @@ class Net:
             # Squeeze to remove empty time dimension
             x_scaled = np.squeeze(x_scaled)
             y_scaled = np.squeeze(y_scaled)
-
+        
+        print("fit model")
         if device is None:
             history = self.model.fit(x_scaled, y_scaled, 
                 epochs=epochs, batch_size=batch_size, shuffle=True, 
@@ -434,7 +442,6 @@ class Net:
         outsource : either numpy.ndarray (if dtype='raw') or mne.SourceEstimate instance
         '''
         
-        
         eeg, _ = self._handle_data_input(args)
 
         if isinstance(eeg, util.EVOKED_INSTANCES):
@@ -460,7 +467,6 @@ class Net:
         else:
             msg = f'eeg must be of type <mne.EvokedArray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
             raise ValueError(msg)
-        
         # Prepare EEG to ensure common average reference and appropriate scaling
         # eeg_prep =  self._prep_eeg(eeg)
         eeg_prep = self.scale_eeg(eeg)
@@ -470,20 +476,22 @@ class Net:
 
         # Predicted sources all in one go
         predicted_sources = self.predict_sources(eeg_prep)       
-        
+
         # Rescale Predicitons
         # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
         predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
+
+
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
         if predicted_sources.shape[-1] == 1:
             predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[:, :, 0], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)]
         else:    
             predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[k], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)
                     for k in range(predicted_sources_scaled.shape[0])]
+        
 
         if len(predicted_source_estimate) == 1:
             predicted_source_estimate = predicted_source_estimate[0]
-
         return predicted_source_estimate
 
     def predict_sources(self, eeg):
@@ -719,17 +727,34 @@ class Net:
         self.model.add(InputLayer(input_shape=input_shape, name='Input'))
         
         # LSTM layers
+        if not isinstance(self.n_lstm_units, (tuple, list)):
+            self.n_lstm_units = [self.n_lstm_units] * self.n_lstm_layers
+        
+        if not isinstance(self.dropout, (tuple, list)):
+            dropout = [self.dropout]*self.n_lstm_layers
+        else:
+            dropout = self.dropout
+        
         for i in range(self.n_lstm_layers):
-            self.model.add(Bidirectional(LSTM(self.n_lstm_units, 
+            self.model.add(Bidirectional(LSTM(self.n_lstm_units[i], 
                 return_sequences=True, input_shape=input_shape, 
-                dropout=self.dropout, activation=self.activation_function), 
+                dropout=dropout[i], activation=self.activation_function), 
                 name=f'RNN_{i}'))
 
         # Hidden Dense layer(s):
+        if not isinstance(self.n_dense_units, (tuple, list)):
+            self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
+        
+        if not isinstance(self.dropout, (tuple, list)):
+            dropout = [self.dropout]*self.n_dense_layers
+        else:
+            dropout = self.dropout
+        
+
         for i in range(self.n_dense_layers):
-            self.model.add(TimeDistributed(Dense(self.n_dense_units, 
+            self.model.add(TimeDistributed(Dense(self.n_dense_units[i], 
                 activation=self.activation_function), name=f'FC_{i}'))
-            self.model.add(Dropout(self.dropout, name=f'Drop_{i}'))
+            self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
 
         # Final For-each layer:
         self.model.add(TimeDistributed(
@@ -965,18 +990,61 @@ class Net:
         error = np.abs(pearsonr(x_true-x_est, x_true)[0])
         return error
     
+    def save(self, path, name='model'):
+        # get list of folders in path
+        list_of_folders = os.listdir(path)
+        model_ints = []
+        for folder in list_of_folders:
+            full_path = os.path.join(path, folder)
+            if not os.path.isdir(full_path):
+                continue
+            if folder.startswith(name):
+                new_integer = int(folder.split('_')[-1])
+                model_ints.append(new_integer)
+        if len(model_ints) == 0:
+            model_name = f'\\{name}_0'
+        else:
+            model_name = f'\\{name}_{max(model_ints)+1}'
+        new_path = path+model_name
+        os.mkdir(new_path)
+
+        # Save model only
+        self.model.save(new_path)
+        # self.model.save_weights(new_path)
+
+        # copy_model = tf.keras.models.clone_model(self.model)
+        # copy_model.compile(optimizer=tf.keras.optimizers.RMSprop(learning_rate=0.001, momentum=0.35), loss='huber')
+        # copy_model.set_weights(self.model.get_weights())
+
+
+        
+        # Save rest
+        # Delete model since it is not serializable
+        self.model = None
+
+        with open(new_path + '\\instance.pkl', 'wb') as f:
+            pkl.dump(self, f)
+        
+        # Attach model again now that everything is saved
+        self.model = tf.keras.models.load_model(new_path)
+        
+        return self
+
+
+
+
+    
 
 def build_nas_lstm(hp):
     ''' Find optimal model using keras tuner.
-    
     '''
     n_dipoles = 1284
     n_channels = 61
     n_lstm_layers = hp.Int("lstm_layers", min_value=0, max_value=3, step=1)
     n_dense_layers = hp.Int("dense_layers", min_value=0, max_value=3, step=1)
-    activation_out = hp.Choice(f"activation_out", ["tanh", 'sigmoid', 'linear'])
-    all_acts = ['sigmoid', 'swish', 'relu', 'elu', 'linear']
-    activation = hp.Choice('actvation_all', all_acts)
+    activation_out = 'linear'  # hp.Choice(f"activation_out", ["tanh", 'sigmoid', 'linear'])
+    activation = 'relu'  # hp.Choice('actvation_all', all_acts)
+
     model = keras.Sequential(name='LSTM_NAS')
     tf.keras.backend.set_image_data_format('channels_last')
     input_shape = (None, n_channels)
@@ -984,16 +1052,16 @@ def build_nas_lstm(hp):
 
     # LSTM layers
     for i in range(n_lstm_layers):
-        n_lstm_units = hp.Int(f"lstm_units_l-{i}", min_value=2, max_value=200, step=1)
-        dropout = hp.Float(f"dropout_lstm_l-{i}", min_value=0, max_value=0.9)
+        n_lstm_units = hp.Int(f"lstm_units_l-{i}", min_value=25, max_value=500, step=1)
+        dropout = hp.Float(f"dropout_lstm_l-{i}", min_value=0, max_value=0.5)
         model.add(Bidirectional(LSTM(n_lstm_units, 
             return_sequences=True, input_shape=input_shape, 
             dropout=dropout, activation=activation), 
             name=f'LSTM{i}'))
     # Hidden Dense layer(s):
     for i in range(n_dense_layers):
-        n_dense_units = hp.Int(f"dense_units_l-{i}", min_value=25, max_value=300, step=1)
-        dropout = hp.Float(f"dropout_dense_l-{i}", min_value=0, max_value=0.9)
+        n_dense_units = hp.Int(f"dense_units_l-{i}", min_value=50, max_value=1000, step=1)
+        dropout = hp.Float(f"dropout_dense_l-{i}", min_value=0, max_value=0.5)
 
         model.add(TimeDistributed(Dense(n_dense_units, 
             activation=activation), name=f'FC_{i}'))
@@ -1004,14 +1072,17 @@ def build_nas_lstm(hp):
         Dense(n_dipoles, activation=activation_out), name='FC_Out')
     )
     model.build(input_shape=input_shape)
-
+    momentum = hp.Float('Momentum', min_value=0, max_value=0.9)
+    nesterov = hp.Choice('Nesterov', [False, True])
+    learning_rate = hp.Choice('learning_rate', [0.01, 0.001])
+    optimizer = hp.Choice("Optimizer", [0,1,2])
+    optimizers = [keras.optimizers.RMSprop(learning_rate=learning_rate, momentum=momentum), keras.optimizers.Adam(learning_rate=learning_rate), keras.optimizers.SGD(learning_rate=learning_rate, nesterov=nesterov)]
     model.compile(
-        optimizer=keras.optimizers.Adam(
-            hp.Float("learning_rate", min_value=0.0005, max_value=0.05,),
-            clipvalue = hp.Float("Clip Value", min_value=0.1, max_value=1)
-        ),
+        optimizer=optimizers[optimizer],
         loss="huber",
-        metrics=["mse", "mae"],
+        # metrics=[tf.keras.metrics.AUC()],
+        # metrics=[evaluate.modified_auc_metric()],
+        metrics=[evaluate.auc],
     )
     return model
 
