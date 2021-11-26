@@ -229,7 +229,7 @@ class Net:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
             # optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
             # optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate,
-                momentum=0.35)
+                # momentum=0.35)
         if loss is None:
             # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
             loss = 'mean_squared_error'
@@ -400,10 +400,12 @@ class Net:
             for time in range(eeg.shape[2]):
                 eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
         
-
-        # Normalize
+        # Common average ref & min-max scaling
+        # m, s = [np.mean(eeg), np.std(eeg)]
+        # eeg_out = (eeg_out-m) / s
         # for sample in range(eeg.shape[0]):
-        #     eeg[sample] /= eeg[sample].std()
+        #     for time in range(eeg.shape[2]):
+        #         eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
 
         return eeg_out
             

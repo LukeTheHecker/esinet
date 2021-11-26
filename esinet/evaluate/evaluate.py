@@ -233,7 +233,7 @@ def eval_nmse(y_true, y_est):
     y_est_normed = y_est / np.max(np.abs(y_est))
     return np.mean((y_true_normed-y_est_normed)**2)
 
-def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
+def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.25, plot_me=False):
     ''' Returns the area under the curve metric between true and predicted
     source. 
 
@@ -258,7 +258,7 @@ def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
         Area under the curve for dipoles far from source.
     '''
     # Copy
-    t_start = time.time()
+    # t_start = time.time()
 
     y_true = deepcopy(y_true)
     y_est = deepcopy(y_est)
@@ -273,24 +273,25 @@ def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
     auc_close = np.zeros((n_redraw))
     auc_far = np.zeros((n_redraw))
     
-    t_prep = time.time()
-    print(f'\tprep took {1000*(t_prep-t_start):.1f} ms')
+    # t_prep = time.time()
+    # print(f'\tprep took {1000*(t_prep-t_start):.1f} ms')
     
     source_mask = (y_true>epsilon).astype(int)
 
     numberOfActiveSources = int(np.sum(source_mask))
+    # print('numberOfActiveSources: ', numberOfActiveSources)
     numberOfDipoles = pos.shape[0]
     # Draw from the 20% of closest dipoles to sources (~100)
     closeSplit = int(round(numberOfDipoles / 5))
     # Draw from the 50% of furthest dipoles to sources
     farSplit = int(round(numberOfDipoles / 2))
-    t_prep = time.time()
-    print(f'\tprep took {1000*(t_prep-t_start):.1f} ms')
+    # t_prep = time.time()
+    # print(f'\tprep took {1000*(t_prep-t_start):.1f} ms')
 
     distSortedIndices = find_indices_close_to_source(source_mask, pos)
 
-    t_prep2 = time.time()
-    print(f'\tprep2 took {1000*(t_prep2-t_prep):.1f} ms')
+    # t_prep2 = time.time()
+    # print(f'\tprep2 took {1000*(t_prep2-t_prep):.1f} ms')
 
     sourceIndices = np.where(source_mask==1)[0]
     
@@ -312,7 +313,7 @@ def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.05, plot_me=False):
     auc_far = np.mean(auc_far)
     auc_close = np.mean(auc_close)
     t_loops = time.time()
-    print(f'\tloops took {1000*(t_loops-t_prep2):.1f} ms')
+    # print(f'\tloops took {1000*(t_loops-t_prep2):.1f} ms')
   
     if plot_me:
         print("plotting")
@@ -371,7 +372,7 @@ def find_indices_close_to_source(source_mask, pos):
             min_distance_to_source[i] = np.min(distances)
         else:
             print('source mask has invalid entries')
-    print('new: ', np.nanmean(min_distance_to_source), min_distance_to_source.shape)
+    # print('new: ', np.nanmean(min_distance_to_source), min_distance_to_source.shape)
     ###OLD
 
     ordered_indices = np.argsort(min_distance_to_source)
@@ -484,7 +485,7 @@ def tf_auc_metric(y_true, y_pred, n_thresholds=200, epsilon=0.1):
     aucs = []
     thresholds = tf.linspace(0, 1, num=n_thresholds)
     for y_true_, y_pred_ in zip(y_true, y_pred):
-        print('go next')
+        # print('go next')
         # Absolute and scaling
         y_true_ = K.abs(y_true_) / K.max(K.abs(y_true_))
         y_pred_ = K.abs(y_pred_) / K.max(K.abs(y_pred_))
@@ -500,7 +501,7 @@ def tf_auc_metric(y_true, y_pred, n_thresholds=200, epsilon=0.1):
             fpr_vec.append(fpr)
             tpr_vec.append(tpr)
         auc = np.abs(np.trapz(tpr_vec, x=fpr_vec))
-        print(tpr_vec)
+        # print(tpr_vec)
         aucs.append( auc )
         # plt.figure()
         # plt.plot(fpr_vec, tpr_vec)
