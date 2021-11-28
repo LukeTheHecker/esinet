@@ -205,15 +205,15 @@ class Net:
         
         
         # Extract data
-        y = sources
-        x = eeg
         
         print("preprocess data")
         # Prepare data
         # Scale sources
-        y_scaled = self.scale_source(y)
+        y_scaled = self.scale_source(sources)
+        del sources
         # Scale EEG
-        x_scaled = self.scale_eeg(x)
+        x_scaled = self.scale_eeg(eeg)
+        del eeg
 
         # Early stopping
         es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', \
@@ -268,7 +268,7 @@ class Net:
                     epochs=epochs, batch_size=batch_size, shuffle=True, 
                     validation_split=validation_split, verbose=self.verbose,
                     callbacks=callbacks, sample_weight=sample_weight)
-                
+        del x_scaled, y_scaled
         if return_history:
             return self, history
         else:
@@ -394,8 +394,10 @@ class Net:
         #         eeg_out[sample, :, time] /= eeg_out[sample, :, time].std()
         
         # Common average ref & min-max scaling
-        minimum, maximum = [np.min(eeg), np.max(eeg)]
-        eeg_out = (eeg_out-minimum) / (maximum-minimum)
+        lower, upper = [np.percentile(eeg, 25), np.percentile(eeg, 75)]
+        # lower, upper = [np.min(eeg), np.max(eeg)]
+        
+        eeg_out = (eeg_out-lower) / (upper-lower)
         for sample in range(eeg.shape[0]):
             for time in range(eeg.shape[2]):
                 eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
@@ -748,7 +750,7 @@ class Net:
         for i in range(self.n_lstm_layers):
             self.model.add(Bidirectional(LSTM(self.n_lstm_units[i], 
                 return_sequences=True, input_shape=input_shape, 
-                dropout=dropout[i], activation=self.activation_function), 
+                dropout=dropout[i], activation='tanh'), # always use tanh, no relu allowed due to exploding loss (gradients?)
                 name=f'RNN_{i}'))
 
         # Hidden Dense layer(s):
