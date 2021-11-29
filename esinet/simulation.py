@@ -15,7 +15,9 @@ from . import util
 DEFAULT_SETTINGS = {
     'method': 'standard',
     'number_of_sources': (1, 10),
-    'extents':  lambda: ((np.random.randn(1)/3.2)+17.2)[0], # (1, 50),
+    # 'extents':  lambda: ((np.random.randn(1)/3.2)+17.2)[0], # (1, 50),
+    'extents':  (20,40),
+    
     'amplitudes': (1, 10),
     'shapes': 'both',
     'duration_of_trial': 1,
@@ -157,7 +159,7 @@ class Simulation:
         self.grid = {
             "shape": shape,
             "k_neighbors": k_neighbors,
-            "exponent": 5,
+            "exponent": 3,
             "x": x,
             "y": y,
             "z": z,
@@ -165,6 +167,7 @@ class Simulation:
             "grid_flat": grid_flat,
             "neighbor_indices": neighbor_indices
         }
+        print(self.grid["exponent"])
         
 
     def simulate_source_noise(self, n_time):
