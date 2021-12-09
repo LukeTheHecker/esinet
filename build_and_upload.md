@@ -12,6 +12,8 @@ workon esienv
 ## Build the package
 
 ```
+# Update/ install build
+py -m pip install --upgrade build
 py -m build --wheel
 ```
 

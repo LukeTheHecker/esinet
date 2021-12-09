@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.2 09.12.2021
+* Fixed bug that occured for temporal simulations using the "duration_of_trial" key in the settings dictionary required for the simulation.Simulation object. Thanks to Winnie for the bug report! :-)
+
 ## 0.1.1 27.08.2021
 * Reverted some changes that turned out not to be functional yet
 
