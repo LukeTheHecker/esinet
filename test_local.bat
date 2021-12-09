@@ -1,1 +1,1 @@
-call pytest C:\Users\lukas\Dokumente\projects\esinet\esinet\tests
+call pytest esinet\tests
