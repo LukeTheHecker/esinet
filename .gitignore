@@ -9,6 +9,9 @@ dev
 notes
 env
 build
+evaluate
+keras-tuner
+logs
 .pytest_cache
 dist
 esinet.egg-info

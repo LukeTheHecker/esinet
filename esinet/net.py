@@ -59,7 +59,6 @@ class Net:
         # self.parallel = parallel
         self.n_jobs = n_jobs
         self.compiled = False
-        self.temporal = False
         self.verbose = verbose
 
     def _embed_fwd(self, fwd):
@@ -229,10 +228,18 @@ class Net:
             self.compiled = True
 
 
-        # Squeeze to remove empty time dimension
-        x_scaled = np.squeeze(x_scaled)
-        y_scaled = np.squeeze(y_scaled)
+        # Add empty time dimension
+        if len(np.squeeze(x_scaled).shape) == 2:
+            x_scaled = np.squeeze(x_scaled)
+            x_scaled = x_scaled[:, :, np.newaxis]
+        if len(np.squeeze(y_scaled).shape) == 2:
+            y_scaled = np.squeeze(y_scaled)
+            y_scaled = y_scaled[:, :, np.newaxis]
 
+        # Temporal nets expect dimensions to be: (samples, time, channels)
+        x_scaled = np.swapaxes(x_scaled,1,2)
+        y_scaled = np.swapaxes(y_scaled,1,2)
+        print(x_scaled.shape, y_scaled.shape)
         if device is None:
             history = self.model.fit(x_scaled, y_scaled, 
                 epochs=epochs, batch_size=batch_size, shuffle=True, 
@@ -381,20 +388,20 @@ class Net:
             3D numpy array of EEG data (samples, channels, time)
         '''
         assert len(eeg.shape)==3, 'eeg must be a 3D numpy array of dim (samples, channels, time)'
-        if not self.temporal:
-            # Predict sources all at once
-            n_samples, n_time, n_elec = eeg.shape
-            ## reshape axis
-            new_shape = (n_samples*n_time, n_elec)
-            eeg_tmp = eeg.reshape(new_shape)
-            ## predict
+        # if not self.temporal:
+        #     # Predict sources all at once
+        #     n_samples, n_time, n_elec = eeg.shape
+        #     ## reshape axis
+        #     new_shape = (n_samples*n_time, n_elec)
+        #     eeg_tmp = eeg.reshape(new_shape)
+        #     ## predict
             
-            predicted_sources = self.model.predict(eeg_tmp)
+        #     predicted_sources = self.model.predict(eeg_tmp)
             
-            ## Get to old shape
-            predicted_sources = predicted_sources.reshape(n_samples, n_time, self.n_dipoles)
-        else:
-            predicted_sources = self.model.predict(eeg)
+        #     ## Get to old shape
+        #     predicted_sources = predicted_sources.reshape(n_samples, n_time, self.n_dipoles)
+        # else:
+        predicted_sources = self.model.predict(eeg)
             
         predicted_sources = np.swapaxes(predicted_sources,1,2)
 
@@ -549,11 +556,8 @@ class Net:
         (1) A simple single hidden layer fully connected ANN for single time instance data
         (2) A LSTM network for spatio-temporal prediction
         '''
-        if self.temporal:
-            msg = 'A temporal model is not yet developed'
-            raise ValueError(msg)
-        else:
-            self._build_perceptron_model()
+     
+        self._build_perceptron_model()
         
 
         if self.verbose:
@@ -562,16 +566,19 @@ class Net:
     def _build_perceptron_model(self):
         ''' Build the artificial neural network model using Dense layers.
         '''
+        input_shape = (None, None, self.n_channels)
+        tf.keras.backend.set_image_data_format('channels_last')
+
         self.model = keras.Sequential()
         # Add hidden layers
         for _ in range(self.n_dense_layers):
-            self.model.add(Dense(units=self.n_dense_units,
-                                activation=self.activation_function))
+            self.model.add(TimeDistributed(Dense(units=self.n_dense_units,
+                                activation=self.activation_function)))
         # Add output layer
-        self.model.add(Dense(self.n_dipoles, activation='linear'))
+        self.model.add(TimeDistributed(Dense(self.n_dipoles, activation='linear')))
         
         # Build model with input layer
-        self.model.build(input_shape=(None, self.n_channels))
+        self.model.build(input_shape=input_shape)
 
 
     def _check_model(self, eeg):
