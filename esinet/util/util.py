@@ -5,6 +5,7 @@ import os
 from copy import deepcopy
 import logging
 from time import time
+from scipy.stats import pearsonr
 from .. import simulation
 from .. import net
 
@@ -388,7 +389,7 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, verbose=0):
         # data_cov = mne.compute_raw_covariance(raw, method='empirical', verbose=verbose)
         # data_cov = mne.cov.regularize(data_cov, raw.info, verbose=verbose)
         
-        lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm='nai', noise_cov=noise_cov, verbose=verbose)
+        lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm=None, noise_cov=noise_cov, verbose=verbose, pick_ori='max-power', rank=None, reduce_rank=False)
         # stc = mne.beamformer.apply_lcmv_raw(raw, lcmv_filter, verbose=verbose)
         stc = mne.beamformer.apply_lcmv(evoked, lcmv_filter, verbose=verbose)
     else:
@@ -536,3 +537,16 @@ def vol_to_src(neighbor_indices, src_3d, pos):
     src = src_3d_flat[neighbor_indices].mean(axis=-1)
 
     return src 
+
+
+def batch_nmse(y_true, y_pred):
+    y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
+    y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
+    nmse = np.nanmean((y_true.flatten()-y_pred.flatten())**2)
+    return nmse
+
+def batch_corr(y_true, y_pred):
+    y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
+    y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
+    r, _ = pearsonr(y_true.flatten(), y_pred.flatten())
+    return r

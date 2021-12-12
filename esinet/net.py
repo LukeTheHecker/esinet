@@ -6,6 +6,7 @@ from tensorflow.keras import layers
 from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional, 
     TimeDistributed, InputLayer, Activation, Reshape, concatenate, Concatenate, 
     Dropout)
+# from tensorflow.compat.v1.keras.layers import CuDNNLSTM as LSTM
 from tensorflow.keras import backend as K
 from keras.layers.core import Lambda
 from scipy.optimize import minimize_scalar
@@ -426,10 +427,13 @@ class Net:
             Scaled sources
         '''
         source_out = deepcopy(source)
+        # for sample in range(source.shape[0]):
+        #     for time in range(source.shape[2]):
+        #         # source_out[sample, :, time] /= source_out[sample, :, time].std()
+        #         source_out[sample, :, time] /= np.max(np.abs(source_out[sample, :, time]))
         for sample in range(source.shape[0]):
-            for time in range(source.shape[2]):
-                # source_out[sample, :, time] /= source_out[sample, :, time].std()
-                source_out[sample, :, time] /= np.max(np.abs(source_out[sample, :, time]))
+            # source_out[sample, :, time] /= source_out[sample, :, time].std()
+            source_out[sample] /= np.max(np.abs(source_out[sample]))
 
         return source_out
             
@@ -717,7 +721,8 @@ class Net:
         for _ in range(self.n_lstm_layers):
             self.model.add(Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
                 input_shape=(self.n_timepoints, self.n_channels), 
-                dropout=self.dropout, activation=self.activation_function)))
+                dropout=self.dropout)))
+            self.model.add(Dropout(self.dropout))
         self.model.add(Flatten())
 
         self.model.add(Dense(int(self.n_timepoints*self.n_dipoles), 
@@ -749,9 +754,9 @@ class Net:
         
         for i in range(self.n_lstm_layers):
             self.model.add(Bidirectional(LSTM(self.n_lstm_units[i], 
-                return_sequences=True, input_shape=input_shape, 
-                dropout=dropout[i], activation='tanh'), # always use tanh, no relu allowed due to exploding loss (gradients?)
+                return_sequences=True, input_shape=input_shape),
                 name=f'RNN_{i}'))
+            self.model.add(Dropout(dropout[i], name=f'Dropout_{i}'))
 
         # Hidden Dense layer(s):
         if not isinstance(self.n_dense_units, (tuple, list)):

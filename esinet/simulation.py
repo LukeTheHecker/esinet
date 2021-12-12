@@ -20,7 +20,7 @@ DEFAULT_SETTINGS = {
     
     'amplitudes': (1, 10),
     'shapes': 'both',
-    'duration_of_trial': 1,
+    'duration_of_trial': 1.0,
     'sample_frequency': 100,
     'target_snr': (2, 20),
     'beta': (0.5, 1.5),  # (0, 3)
