@@ -490,9 +490,9 @@ def custom_logger(logger_name, level=logging.DEBUG):
     logger.addHandler(file_handler)
     return logger
 
-def load_net(path, name='instance'):
+def load_net(path, name='instance', custom_objects={}):
     import tensorflow as tf
-    model = tf.keras.models.load_model(path)
+    model = tf.keras.models.load_model(path, custom_objects=custom_objects)
     with open(path + f'\\{name}.pkl', 'rb') as f:
         net = pkl.load(f)
     net.model = model
@@ -539,6 +539,10 @@ def vol_to_src(neighbor_indices, src_3d, pos):
     return src 
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> e96bceb58823fe6f990a802829d6fbda6650bdc0
 def batch_nmse(y_true, y_pred):
     y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
     y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
@@ -549,4 +553,8 @@ def batch_corr(y_true, y_pred):
     y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
     y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
     r, _ = pearsonr(y_true.flatten(), y_pred.flatten())
+<<<<<<< HEAD
     return r
+=======
+    return r
+>>>>>>> e96bceb58823fe6f990a802829d6fbda6650bdc0

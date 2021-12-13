@@ -5,12 +5,17 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional, 
     TimeDistributed, InputLayer, Activation, Reshape, concatenate, Concatenate, 
+<<<<<<< HEAD
     Dropout)
 # from tensorflow.compat.v1.keras.layers import CuDNNLSTM as LSTM
+=======
+    Dropout, Conv2D)
+>>>>>>> e96bceb58823fe6f990a802829d6fbda6650bdc0
 from tensorflow.keras import backend as K
 from keras.layers.core import Lambda
 from scipy.optimize import minimize_scalar
-import pickle as pkl
+# import pickle as pkl
+import dill as pkl
 import datetime
 # from sklearn import linear_model
 import numpy as np
@@ -86,6 +91,7 @@ class Net:
         self.leadfield = leadfield
         self.n_channels = leadfield.shape[0]
         self.n_dipoles = leadfield.shape[1]
+        self.interp_channel_shape = (11,11)
     
     @staticmethod
     def _handle_data_input(arguments):
@@ -177,7 +183,7 @@ class Net:
             Method returns the object itself.
 
         '''
-
+        self.loss = loss
         self.dropout = dropout
         eeg, sources = self._handle_data_input(args)
         self.subject = sources.subject if type(sources) == mne.SourceEstimate \
@@ -231,21 +237,22 @@ class Net:
             # optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
             # optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate,
                 # momentum=0.35)
-        if loss is None:
-            # loss = self.default_loss(weight=false_positive_penalty, delta=delta)
-            loss = 'mean_squared_error'
+        if self.loss is None:
+            # self.loss = self.default_loss(weight=false_positive_penalty, delta=delta)
+            self.loss = 'mean_squared_error'
 
 
         elif type(loss) == list:
-            loss = loss[0](*loss[1])
+            self.loss = self.loss[0](*self.loss[1])
         if metrics is None:
             # metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
             metrics = ['mae']
         
         # Compile if it wasnt compiled before
         if not self.compiled:
-            self.model.compile(optimizer, loss, metrics=metrics)
+            self.model.compile(optimizer, self.loss, metrics=metrics)
             self.compiled = True
+
         
         print("reshape data")
         if self.temporal:
@@ -698,16 +705,19 @@ class Net:
         (2) A LSTM network for spatio-temporal prediction
         '''
         if (self.temporal and self.model_type=='auto') or self.model_type=='v2':
-            self._build_temporal_model_v2()
-        elif self.temporal and self.model_type=='v3':
-            self._build_temporal_model_v3()
-            # self._build_attention_model()
+            self._build_temporal_model()
+        elif self.model_type.lower() == 'convdip':
+            self._build_convdip_model()
+        # elif self.temporal and self.model_type=='v3':
+        #     self._build_temporal_model_v3()
+        #     # self._build_attention_model()
         else:
             self._build_perceptron_model()
         
 
         if self.verbose:
             self.model.summary()
+<<<<<<< HEAD
     
     def _build_temporal_model(self):
         ''' Build the temporal artificial neural network model using LSTM 
@@ -734,8 +744,10 @@ class Net:
         self.model.add(Activation('linear'))
         
         self.model.build(input_shape=input_shape)
+=======
+>>>>>>> e96bceb58823fe6f990a802829d6fbda6650bdc0
         
-    def _build_temporal_model_v2(self):
+    def _build_temporal_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
         self.model = keras.Sequential(name='LSTM_v2')
@@ -816,39 +828,39 @@ class Net:
 
         self.model = model_m
     
-    
-    
-    def _build_attention_model(self):
-        ''' Build the temporal artificial neural network model using LSTM 
-        layers and attention.
-        Attention code from: 
         
-        https://machinelearningmastery.com/encoder-decoder-attention-sequence-to-sequence-prediction-keras/
-
-        '''
-
+    def _build_convdip_model(self):
+        self.model = keras.Sequential(name='ConvDip')
         tf.keras.backend.set_image_data_format('channels_last')
-        inputs = keras.Input(shape=(None, self.n_channels), name='Input')
-        
-       
-        lstm = Bidirectional(LSTM(self.n_lstm_units, return_sequences = True), name="bi_lstm_0")(inputs)
+        # Some definitions
+        input_shape = (None, self.interp_channel_shape, 1)
+        n_filters = 8
+        kernel_size = (3, 3)
 
-        # Getting our LSTM outputs
-        (lstm, forward_h, forward_c, backward_h, backward_c) = Bidirectional(
-            LSTM(self.n_lstm_units, return_sequences=True, return_state=True), 
-            activation=self.activation_function, name="bi_lstm_1")(input)
-
-        state_h = Concatenate()([forward_h, backward_h])
-        state_c = Concatenate()([forward_c, backward_c])
-        context_vector, attention_weights = Attention(self.n_lstm_units)(lstm, state_h)
-        dense1 = Dense(self.n_dense_units, activation=self.activation_function, )(context_vector)
-        # dropout = Dropout(0.05)(dense1)
-        output = Dense(self.n_dipoles, activation="linear")(dense1)
+        # Hidden Dense layer(s):
+        if not isinstance(self.n_dense_units, (tuple, list)):
+            self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
         
-        model = keras.Model(inputs=inputs, outputs=output)
+        if not isinstance(self.dropout, (tuple, list)):
+            dropout = [self.dropout]*self.n_dense_layers
+        else:
+            dropout = self.dropout
+
+        self.model.add(InputLayer(input_shape=input_shape, name='Input'))
+        self.model.add(TimeDistributed(Conv2D(n_filters, kernel_size, activation=self.activation_function)))
+        self.model.add(TimeDistributed(Flatten()))
+
+        for i in range(self.n_dense_layers):
+            self.model.add(TimeDistributed(Dense(self.n_dense_units[i], activation=activation, name=f'FC_{i}')))
+            self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
+
+        # Outout Layer
+        self.model.add(TimeDistributed(Dense(self.n_dipoles, activation='linear'), name='FC_Out'))
 
         self.model.build(input_shape=input_shape)
-    
+
+        
+        
   
 
     def _freeze_lstm(self):
@@ -1043,7 +1055,11 @@ class Net:
             pkl.dump(self, f)
         
         # Attach model again now that everything is saved
-        self.model = tf.keras.models.load_model(new_path)
+        try:
+            self.model = tf.keras.models.load_model(new_path, custom_objects={'loss': self.loss})
+        except:
+            print("Load model did not work using custom_objects. Now trying it without...")
+            self.model = tf.keras.models.load_model(new_path)
         
         return self
 

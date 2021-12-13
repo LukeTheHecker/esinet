@@ -17,7 +17,6 @@ DEFAULT_SETTINGS = {
     'number_of_sources': (1, 10),
     # 'extents':  lambda: ((np.random.randn(1)/3.2)+17.2)[0], # (1, 50),
     'extents':  (20,40),
-    
     'amplitudes': (1, 10),
     'shapes': 'both',
     'duration_of_trial': 1.0,
@@ -116,20 +115,48 @@ class Simulation:
 
         if self.verbose:
                 print(f'Simulate Source')
-        if self.parallel:
-            source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
-                (delayed(self.simulate_source)() 
-                for _ in range(n_samples)))
-        else:
-            if self.settings["method"] == "standard":
+
+
+        if self.settings["method"] == "standard":
+            print("Simulating data based on sparse patches.")
+            if self.parallel:
+                source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                    (delayed(self.simulate_source)() 
+                    for _ in tqdm(range(n_samples))))
+            else:
                 for i in tqdm(range(n_samples)):
                     source_data[i] = self.simulate_source()
-                
-            elif self.settings["method"] == "noise":
-                print("doing the noise-based source simulation thing")
-                self.prepare_grid()
+            
+        elif self.settings["method"] == "noise":
+            print("Simulating data based on 1/f noise.")
+            self.prepare_grid()
+            if self.parallel:
+                source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                    (delayed(self.simulate_source_noise)() 
+                    for _ in tqdm(range(n_samples))))
+            else:
                 for i in tqdm(range(n_samples)):
                     source_data[i] = self.simulate_source_noise(n_time)
+
+        elif self.settings["method"] == "mixed":
+            print("Simulating data based on 1/f noise and sparse patches.")
+            self.prepare_grid()
+            if self.parallel:
+                source_data_tmp = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                    (delayed(self.simulate_source_noise)() 
+                    for _ in tqdm(range(int(n_samples/2)))))
+                source_data[:int(n_samples/2)] = source_data_tmp
+                source_data_tmp = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                    (delayed(self.simulate_source)() 
+                    for _ in tqdm(range(int(n_samples/2), n_samples))))
+                source_data[int(n_samples/2):] = source_data_tmp
+            else:
+                for i in tqdm(range(int(n_samples/2))):
+                    source_data[i] = self.simulate_source_noise(n_time)
+                for i in tqdm(range(int(n_samples/2), n_samples)):
+                    source_data[i] = self.simulate_source()
+                    
+
         # Convert to mne.SourceEstimate
         if self.verbose:
             print(f'Converting Source Data to mne.SourceEstimate object')
@@ -167,7 +194,6 @@ class Simulation:
             "grid_flat": grid_flat,
             "neighbor_indices": neighbor_indices
         }
-        print(self.grid["exponent"])
         
 
     def simulate_source_noise(self, n_time):
@@ -177,6 +203,9 @@ class Simulation:
         src = np.zeros((1284, n_time))
         for i in range(n_time):
             src[:, i] = util.vol_to_src(self.grid["neighbor_indices"], src_3d[:, :, :, i], self.pos)
+        
+        d = dict(number_of_sources=np.nan, positions=[np.nan], extents=[np.nan], amplitudes=[np.nan], shapes=[np.nan], target_snr=0)
+        self.simulation_info = self.simulation_info.append(d, ignore_index=True)
         return src
         
     def sources_to_sourceEstimates(self, source_data):
@@ -362,9 +391,10 @@ class Simulation:
         betas = [self.get_from_range(self.settings['beta'], dtype=float) for _ in range(n_samples)]
 
         # Document snr and beta into the simulation info
+        
         self.simulation_info['betas'] = betas
         self.simulation_info['target_snr'] = target_snrs
-            
+    
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
         if self.verbose:
             print(f'\nProject sources to EEG...')
@@ -516,13 +546,14 @@ class Simulation:
             noise=noise[:, :, :1]
     
         noise_gfp = np.std(noise, axis=1)
-        rms_noise = np.mean(noise_gfp)  # rms(noise)
+        rms_noise = np.median(noise_gfp)  # rms(noise)
         
         x_gfp = np.std(x, axis=1)
-        rms_x = np.mean(np.max(np.abs(x_gfp), axis=1))  # x.max()
+        rms_x = np.median(x_gfp)  # np.mean(np.max(np.abs(x_gfp), axis=1))  # x.max()
         
         # rms_noise = rms(noise-np.mean(noise))
         noise_scaler = rms_x / (rms_noise*snr)
+        # print(f'rms_x = {rms_x}\nrms_noise = {rms_noise}\n\tScaling by {noise_scaler} to yield snr of {snr}')
         out = x + noise*noise_scaler  
 
         return out
@@ -663,4 +694,24 @@ class Simulation:
         
         return self
         
+    def shuffle(self):
+        ''' Shuffle the simulated samples.'''
+        sources = self.source_data
+        epochs = self.eeg_data
+        df = self.simulation_info
+        n_samples = len(epochs)
+
+        # Shuffle everything
+        new_order = np.arange(n_samples)
+        np.random.shuffle(new_order)
+        epochs = epochs[new_order]
         
+        if type(sources) == list:
+            sources = list(np.array(sources)[new_order])
+
+        df = df.reindex(new_order)
+
+        # store back
+        self.eeg_data = epochs
+        self.source_data = sources
+        self.simulation_info = df
