@@ -1,6 +1,43 @@
 import tensorflow as tf
 from tensorflow.keras import backend as K
 
+
+def reg_loss(reg=0.1):
+    reg = tf.cast(reg, tf.float32)
+    def mse(y_true, y_pred):
+        return tf.keras.losses.mean_squared_error(y_true, y_pred) + K.mean(K.abs(y_pred))*reg
+    return mse
+
+def nmse_loss(reg=0.05):
+    ''' Weighted mean squared error (MSE) loss. A loss function that can be 
+    used with tensorflow/keras which calculates the MSE with a weighting of 
+    false positive predicitons. Set weight high for more conservative 
+    predictions.
+    Parameters
+    ----------
+    weight : float
+        Weighting factor which penalizes false positives.
+    min_val : float
+        The threshold below which the target is set to zero.
+    Return
+    ------
+    loss : loss function
+    '''
+    reg = tf.cast(reg, tf.float32)
+
+    def loss(true, pred):
+        # Scale to max(abs(x)) == 1
+        pred = scale_mat(pred)
+        true = scale_mat(true)
+        
+        # Calc squared error
+        error = K.square(true - pred)
+        
+
+        return K.mean(error) + K.mean(K.abs(pred))*reg
+
+    return loss
+
 def weighted_mse_loss(weight=1, min_val=1e-3, scale=True):
     ''' Weighted mean squared error (MSE) loss. A loss function that can be 
     used with tensorflow/keras which calculates the MSE with a weighting of 

@@ -5,6 +5,7 @@ import os
 from copy import deepcopy
 import logging
 from time import time
+from scipy.stats import pearsonr
 from .. import simulation
 from .. import net
 
@@ -489,9 +490,9 @@ def custom_logger(logger_name, level=logging.DEBUG):
     logger.addHandler(file_handler)
     return logger
 
-def load_net(path, name='instance'):
+def load_net(path, name='instance', custom_objects={}):
     import tensorflow as tf
-    model = tf.keras.models.load_model(path)
+    model = tf.keras.models.load_model(path, custom_objects=custom_objects)
     with open(path + f'\\{name}.pkl', 'rb') as f:
         net = pkl.load(f)
     net.model = model
@@ -536,3 +537,17 @@ def vol_to_src(neighbor_indices, src_3d, pos):
     src = src_3d_flat[neighbor_indices].mean(axis=-1)
 
     return src 
+
+
+
+def batch_nmse(y_true, y_pred):
+    y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
+    y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
+    nmse = np.nanmean((y_true.flatten()-y_pred.flatten())**2)
+    return nmse
+
+def batch_corr(y_true, y_pred):
+    y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
+    y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
+    r, _ = pearsonr(y_true.flatten(), y_pred.flatten())
+    return r
