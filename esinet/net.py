@@ -5,12 +5,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional, 
     TimeDistributed, InputLayer, Activation, Reshape, concatenate, Concatenate, 
-<<<<<<< HEAD
-    Dropout)
-# from tensorflow.compat.v1.keras.layers import CuDNNLSTM as LSTM
-=======
     Dropout, Conv2D)
->>>>>>> e96bceb58823fe6f990a802829d6fbda6650bdc0
 from tensorflow.keras import backend as K
 from keras.layers.core import Lambda
 from scipy.optimize import minimize_scalar
@@ -717,35 +712,6 @@ class Net:
 
         if self.verbose:
             self.model.summary()
-<<<<<<< HEAD
-    
-    def _build_temporal_model(self):
-        ''' Build the temporal artificial neural network model using LSTM 
-        layers.
-        '''
-        self.model = keras.Sequential()
-        tf.keras.backend.set_image_data_format('channels_last')
-        input_shape = (self.n_timepoints, self.n_channels)
-        self.model.add(InputLayer(input_shape=input_shape))
-        
-        for _ in range(self.n_lstm_layers):
-            self.model.add(Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
-                input_shape=(self.n_timepoints, self.n_channels), 
-                dropout=self.dropout)))
-            self.model.add(Dropout(self.dropout))
-        self.model.add(Flatten())
-
-        self.model.add(Dense(int(self.n_timepoints*self.n_dipoles), 
-            activation='linear'))
-
-        self.model.add(Dense(int(self.n_timepoints*self.n_dipoles), 
-            activation='linear'))
-        self.model.add(Reshape((self.n_timepoints, self.n_dipoles)))
-        self.model.add(Activation('linear'))
-        
-        self.model.build(input_shape=input_shape)
-=======
->>>>>>> e96bceb58823fe6f990a802829d6fbda6650bdc0
         
     def _build_temporal_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.

@@ -2,6 +2,7 @@ import pickle as pkl
 import mne
 import numpy as np
 import os
+from joblib import delayed, Parallel
 from copy import deepcopy
 import logging
 from time import time
@@ -380,7 +381,7 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, verbose=0):
     
     
     if method.lower()=='beamformer' or method.lower()=='lcmv' or method.lower()=='beamforming':
-        noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
+        # noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
         # noise_cov = mne.compute_covariance(epochs, method='empirical', verbose=verbose)
         # noise_cov = mne.compute_raw_covariance(raw, tmin=None, method='empirical', verbose=verbose)
         # noise_cov = mne.cov.regularize(noise_cov, raw.info, verbose=verbose)
@@ -389,7 +390,7 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, verbose=0):
         # data_cov = mne.compute_raw_covariance(raw, method='empirical', verbose=verbose)
         # data_cov = mne.cov.regularize(data_cov, raw.info, verbose=verbose)
         
-        lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm=None, noise_cov=noise_cov, verbose=verbose, pick_ori='max-power', rank=None, reduce_rank=False)
+        lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm=None, noise_cov=None, verbose=verbose, pick_ori='max-power', rank=None, reduce_rank=False)
         # stc = mne.beamformer.apply_lcmv_raw(raw, lcmv_filter, verbose=verbose)
         stc = mne.beamformer.apply_lcmv(evoked, lcmv_filter, verbose=verbose)
     else:
@@ -404,17 +405,26 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, verbose=0):
                                     method=method, return_residual=False, verbose=verbose)
     return stc
 
-def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, tmax=0):
+def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, tmax=0, parallel=True):
     ''' Wrapper that calculates inverse solutions to a bunch of simulated
         samples of a esinet.Simulation object
     '''
     eeg, sources = net.Net._handle_data_input((sim,))
     n_samples = eeg.get_data().shape[0]
-    stcs = []
-
-    for i in range(n_samples):
-        stc = mne_inverse(fwd, eeg[i], method=method, snr=snr, tmax=tmax)
-        stcs.append(stc)
+    
+    if n_samples < 4:
+        parallel = False
+    
+    if parallel:
+        stcs = Parallel(n_jobs=-1, backend="loky") \
+            (delayed(mne_inverse)(fwd, eeg[i], method=method, snr=snr, tmax=tmax) \
+            for i in range(n_samples))
+    else:
+        stcs = []
+    
+        for i in range(n_samples):
+            stc = mne_inverse(fwd, eeg[i], method=method, snr=snr, tmax=tmax)
+            stcs.append(stc)
     return stcs
 
 
@@ -539,10 +549,6 @@ def vol_to_src(neighbor_indices, src_3d, pos):
     return src 
 
 
-<<<<<<< HEAD
-=======
-
->>>>>>> e96bceb58823fe6f990a802829d6fbda6650bdc0
 def batch_nmse(y_true, y_pred):
     y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
     y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
@@ -553,8 +559,4 @@ def batch_corr(y_true, y_pred):
     y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
     y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
     r, _ = pearsonr(y_true.flatten(), y_pred.flatten())
-<<<<<<< HEAD
     return r
-=======
-    return r
->>>>>>> e96bceb58823fe6f990a802829d6fbda6650bdc0
