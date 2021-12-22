@@ -21,30 +21,30 @@ fwd = forward.create_forward_model(info=info)
 fwd_free = forward.create_forward_model(info=info, fixed_ori=False)
 
 # Load Data Set
-with open(r'simulations/sim_11000_200-1000points.pkl', 'rb') as f:
-    sim_lstm = pkl.load(f)
+# with open(r'simulations/sim_10200_200-1000points.pkl', 'rb') as f:
+#     sim_lstm = pkl.load(f)
 
 ########################################################################
-# # Create Data set
-# n_samples = 10000
-# duration_of_trial = (0.01, 2)
-# settings = dict(duration_of_trial=duration_of_trial, method='standard')
-# sim_lstm_short = Simulation(fwd, info, verbose=True, settings=settings).simulate(n_samples=n_samples)
+# Create Data set
+n_samples = 10000
+duration_of_trial = (0.01, 2)
+settings = dict(duration_of_trial=duration_of_trial, method='standard')
+sim_lstm_short = Simulation(fwd, info, verbose=True, settings=settings).simulate(n_samples=n_samples)
 
-# n_samples = 1000
-# duration_of_trial = (2, 10)
-# settings = dict(duration_of_trial=duration_of_trial, method='standard')
-# sim_lstm_long = Simulation(fwd, info, verbose=True, settings=settings).simulate(n_samples=n_samples)
+n_samples = 200
+duration_of_trial = (2, 10)
+settings = dict(duration_of_trial=duration_of_trial, method='standard')
+sim_lstm_long = Simulation(fwd, info, verbose=True, settings=settings).simulate(n_samples=n_samples)
 
-# print("Adding:")
-# sim_lstm = sim_lstm_short + sim_lstm_long
-# del sim_lstm_short, sim_lstm_long
-# sim_lstm.shuffle()
+print("Adding:")
+sim_lstm = sim_lstm_short + sim_lstm_long
+del sim_lstm_short, sim_lstm_long
+sim_lstm.shuffle()
 
-# if type(duration_of_trial) == tuple:
-#     sim_lstm.save(f'simulations/sim_{sim_lstm.n_samples}_{int(duration_of_trial[0]*100)}-{int(duration_of_trial[1]*100)}points.pkl')
-# else:
-#     sim_lstm.save(f'simulations/sim_{sim_lstmn_samples}_{int(duration_of_trial*100)}points.pkl')
+if type(duration_of_trial) == tuple:
+    sim_lstm.save(f'simulations/sim_{sim_lstm.n_samples}_{int(duration_of_trial[0]*100)}-{int(duration_of_trial[1]*100)}points.pkl')
+else:
+    sim_lstm.save(f'simulations/sim_{sim_lstmn_samples}_{int(duration_of_trial*100)}points.pkl')
 ########################################################################
 
 

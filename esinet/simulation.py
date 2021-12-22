@@ -333,7 +333,12 @@ class Simulation:
             elif shape == 'flat':
                 if not isinstance(signal, (list, np.ndarray)):
                     signal = np.array([signal])
-                    activity = util.repeat_newcol(amplitude * signal, len(d)).T[:, np.newaxis]
+                    activity = util.repeat_newcol(amplitude * signal, len(d))
+                    if len(activity.shape) == 0:
+                        activity = np.array([activity]).T[:, np.newaxis]
+                    else:
+                        activity = activity.T[:, np.newaxis]
+                    
                 else:
                     activity = util.repeat_newcol(amplitude * signal, len(d)).T
                 if len(activity.shape) == 1:

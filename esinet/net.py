@@ -130,7 +130,7 @@ class Net:
         validation_split=0.1, epochs=50, metrics=None, device=None, 
         false_positive_penalty=2, delta=1., batch_size=128, loss=None, 
         sample_weight=None, return_history=False, dropout=0.2, patience=7, 
-        tensorboard=False):
+        tensorboard=False, validation_freq=1):
         ''' Train the neural network using training data (eeg) and labels (sources).
         
         Parameters
@@ -264,7 +264,8 @@ class Net:
             history = self.model.fit(x=gen, 
                     epochs=epochs, batch_size=batch_size, 
                     steps_per_epoch=steps_per_epoch, verbose=self.verbose, callbacks=callbacks, 
-                    sample_weight=sample_weight, validation_data=validation_data, workers=1)
+                    sample_weight=sample_weight, validation_data=validation_data, 
+                    validation_freq=validation_freq, workers=1)
         else:
             with tf.device(device):
                 # history = self.model.fit(x_scaled, y_scaled, 
@@ -275,7 +276,8 @@ class Net:
                 history = self.model.fit(x=gen, 
                     epochs=epochs, batch_size=batch_size, 
                     steps_per_epoch=steps_per_epoch, verbose=self.verbose, callbacks=callbacks, 
-                    sample_weight=sample_weight, validation_data=validation_data, workers=1)
+                    sample_weight=sample_weight, validation_data=validation_data, 
+                    validation_freq=validation_freq, workers=1)
                 
 
         del x_scaled, y_scaled
