@@ -8,6 +8,7 @@ from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional,
     Dropout, Conv2D)
 from tensorflow.keras import backend as K
 from keras.layers.core import Lambda
+from keras.preprocessing.sequence import pad_sequences
 from scipy.optimize import minimize_scalar
 # import pickle as pkl
 import dill as pkl
@@ -180,43 +181,10 @@ class Net:
         '''
         self.loss = loss
         self.dropout = dropout
-        eeg, sources = self._handle_data_input(args)
-        self.subject = sources.subject if type(sources) == mne.SourceEstimate \
-            else sources[0].subject
-        # Decide gross model architecture
-        if self.model_type == 'single' or (self.model_type=='auto' and type(sources) != list):
-            self.temporal = False
-        else:
-            self.temporal = True
-        
-        # Ensure that the forward model has the same 
-        # channels as the eeg object
-        self._check_model(eeg)
-        print("handle data")
-        # Handle EEG input
-        eeg = eeg.get_data()
-
-        # Handle source input
-        if type(sources) == mne.source_estimate.SourceEstimate:
-            sources = sources.data.T
-            # add empty temporal dimension
-            sources = np.expand_dims(sources, axis=2)
-        elif type(sources) == list:
-            if type(sources[0]) == mne.source_estimate.SourceEstimate:
-                sources = np.stack([source.data for source in sources], axis=0)
-        
-        
-        # Extract data
-        
+    
         print("preprocess data")
-        # Prepare data
-        # Scale sources
-        y_scaled = self.scale_source(sources)
-        del sources
-        # Scale EEG
-        x_scaled = self.scale_eeg(eeg)
-        del eeg
-
+        x_scaled, y_scaled = self.prep_data(args)
+        
         # Early stopping
         es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', \
             mode='min', verbose=self.verbose, patience=patience, restore_best_weights=True)
@@ -226,7 +194,7 @@ class Net:
                 log_dir=log_dir, histogram_freq=1)
             callbacks = [es, tensorboard_callback]
         else:
-            callbacks = [es]
+            callbacks = []#[es]
         if optimizer is None:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
             # optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
@@ -247,37 +215,76 @@ class Net:
         if not self.compiled:
             self.model.compile(optimizer, self.loss, metrics=metrics)
             self.compiled = True
-
-        
-        print("reshape data")
-        if self.temporal:
-            # LSTM net expects dimensions to be: (samples, time, channels)
-            x_scaled = np.swapaxes(x_scaled,1,2)
-            y_scaled = np.swapaxes(y_scaled,1,2)
-        else:
-            # Squeeze to remove empty time dimension
-            x_scaled = np.squeeze(x_scaled)
-            y_scaled = np.squeeze(y_scaled)
+        # print("shapes before fit: ", x_scaled.shape, y_scaled.shape)
         
         print("fit model")
+        def generate_batches(x, y, batch_size):
+            # print("len x: ", len(x), type(x), type(x[0]), x[0].shape)
+            # print("len y: ", len(y),  type(y), type(y[0]), y[0].shape)
+            n_batches = int(len(x) / batch_size)
+            x = x[:int(n_batches*batch_size)]
+            y = y[:int(n_batches*batch_size)]
+            
+            time_lengths = [x_let.shape[-2] for x_let in x]
+            idc = list(np.argsort(time_lengths).astype(int))
+            # print("len idc: ", len(idc), " idc: ", idc)
+            
+            x = [x[i] for i in idc]
+            y = [y[i] for i in idc]
+            while True:
+                x_pad = []
+                y_pad = []
+                for batch in range(n_batches):
+                    # print(batch, len(x), batch*batch_size, (batch+1)*batch_size, x[batch*batch_size:(batch+1)*batch_size])
+                    x_padlet = pad_sequences( x[batch*batch_size:(batch+1)*batch_size], dtype='float32' )
+                    y_padlet = pad_sequences( y[batch*batch_size:(batch+1)*batch_size], dtype='float32' )
+                    
+                    
+                    x_pad.append( x_padlet )
+                    y_pad.append( y_padlet )
+                
+                new_order = np.arange(len(x_pad))
+                np.random.shuffle(new_order)
+                x_pad = [x_pad[i] for i in new_order]
+                y_pad = [y_pad[i] for i in new_order]
+                for x_padlet, y_padlet in zip(x_pad, y_pad):
+                    # print(x_padlet.shape, y_padlet.shape, x_padlet[0,:], y_padlet[0,:])
+                    yield (x_padlet, y_padlet)
+        
+        n_samples = len(x_scaled)
+        stop_idx = int(round(n_samples * (1-validation_split)))
+        gen = generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size)
+        steps_per_epoch = (n_samples*(1-validation_split)) / batch_size
+        validation_data = (pad_sequences(x_scaled[stop_idx:], dtype='float32'), pad_sequences(y_scaled[stop_idx:], dtype='float32'))
         if device is None:
-            history = self.model.fit(x_scaled, y_scaled, 
-                epochs=epochs, batch_size=batch_size, shuffle=True, 
-                validation_split=validation_split, verbose=self.verbose, 
-                callbacks=callbacks, sample_weight=sample_weight)
+            # history = self.model.fit(x_scaled, y_scaled, 
+            #     epochs=epochs, batch_size=batch_size, shuffle=True, 
+            #     validation_split=validation_split, verbose=self.verbose, 
+            #     callbacks=callbacks, sample_weight=sample_weight)
+            history = self.model.fit(x=gen, 
+                    epochs=epochs, batch_size=batch_size, 
+                    steps_per_epoch=steps_per_epoch, verbose=self.verbose, callbacks=callbacks, 
+                    sample_weight=sample_weight, validation_data=validation_data, workers=1)
         else:
             with tf.device(device):
-                history = self.model.fit(x_scaled, y_scaled, 
-                    epochs=epochs, batch_size=batch_size, shuffle=True, 
-                    validation_split=validation_split, verbose=self.verbose,
-                    callbacks=callbacks, sample_weight=sample_weight)
+                # history = self.model.fit(x_scaled, y_scaled, 
+                #     epochs=epochs, batch_size=batch_size, shuffle=True, 
+                #     validation_split=validation_split, verbose=self.verbose,
+                #     callbacks=callbacks, sample_weight=sample_weight)
+                # history = self.model.fit_generator(gen)
+                history = self.model.fit(x=gen, 
+                    epochs=epochs, batch_size=batch_size, 
+                    steps_per_epoch=steps_per_epoch, verbose=self.verbose, callbacks=callbacks, 
+                    sample_weight=sample_weight, validation_data=validation_data, workers=1)
+                
+
         del x_scaled, y_scaled
         if return_history:
             return self, history
         else:
             return self
 
-    def prep_data(self, *args,  dropout=0.2):
+    def prep_data(self, args,  dropout=0.2):
         ''' Train the neural network using training data (eeg) and labels (sources).
         
         Parameters
@@ -336,43 +343,54 @@ class Net:
             self.temporal = False
         else:
             self.temporal = True
-        
         # Ensure that the forward model has the same 
         # channels as the eeg object
-        # self._check_model(eeg)
+        self._check_model(eeg)
+        # print("prep fun: ", eeg, len(eeg), type(eeg))
 
         # Handle EEG input
-        eeg = eeg.get_data()
+        if (type(eeg) == list and isinstance(eeg[0], util.EPOCH_INSTANCES)) or isinstance(eeg, util.EPOCH_INSTANCES):
+            eeg = [eeg[i].get_data() for i, _ in enumerate(eeg)]
+        else:
+            
+            eeg = [sample_eeg[0] for sample_eeg in eeg]
 
-        # Handle source input
-        if type(sources) == mne.source_estimate.SourceEstimate:
-            sources = sources.data.T
-            # add empty temporal dimension
-            sources = np.expand_dims(sources, axis=2)
-        elif type(sources) == list:
-            if type(sources[0]) == mne.source_estimate.SourceEstimate:
-                sources = np.stack([source.data for source in sources], axis=0)
+        for i, eeg_sample in enumerate(eeg):
+            if len(eeg_sample.shape) == 1:
+                eeg[i] = eeg_sample[:, np.newaxis]
+            if len(eeg_sample.shape) == 3:
+                eeg[i] = eeg_sample[0]
         
+        # check if temporal dimension has all-equal entries
+        self.equal_temporal = np.all( np.array([sample_eeg.shape[-1] for sample_eeg in eeg]) == eeg[0].shape[-1])
         
+        sources = [source.data for source in sources]
+
+        # enforce shape: list of samples, samples of shape (channels/dipoles, time)
+        assert len(sources[0].shape) == 2, "sources samples must be two-dimensional"
+        assert len(eeg[0].shape) == 2, "eeg samples must be two-dimensional"
+        assert type(sources) == list, "sources must be a list of samples"
+        assert type(eeg) == list, "eeg must be a list of samples"
+        assert type(sources[0]) == np.ndarray, "sources must be a list of numpy.ndarrays"
+        assert type(eeg[0]) == np.ndarray, "eeg must be a list of numpy.ndarrays"
+        
+
         # Extract data
-        y = sources
-        x = eeg
-
         # Prepare data
         # Scale sources
-        y_scaled = self.scale_source(y)
+        y_scaled = self.scale_source(sources)
         # Scale EEG
-        x_scaled = self.scale_eeg(x)
+        x_scaled = self.scale_eeg(eeg)
 
-        # Compile if it wasnt compiled before
-        if self.temporal:
-            # LSTM net expects dimensions to be: (samples, time, channels)
-            x_scaled = np.swapaxes(x_scaled,1,2)
-            y_scaled = np.swapaxes(y_scaled,1,2)
-        else:
-            # Squeeze to remove empty time dimension
-            x_scaled = np.squeeze(x_scaled)
-            y_scaled = np.squeeze(y_scaled)
+        # LSTM net expects dimensions to be: (samples, time, channels)
+        x_scaled = [np.swapaxes(x,0,1) for x in x_scaled]
+        y_scaled = [np.swapaxes(y,0,1) for y in y_scaled]
+
+        # x_scaled = pad_sequences(x_scaled, dtype='float32')
+        # y_scaled = pad_sequences(y_scaled, dtype='float32')
+        
+
+
         return x_scaled, y_scaled
 
     def scale_eeg(self, eeg):
@@ -397,23 +415,22 @@ class Net:
         #         eeg_out[sample, :, time] /= eeg_out[sample, :, time].std()
         
         # Common average ref & min-max scaling
-        lower, upper = [np.percentile(eeg, 25), np.percentile(eeg, 75)]
+        # lower, upper = [np.percentile(eeg, 25), np.percentile(eeg, 75)]
         # lower, upper = [np.min(eeg), np.max(eeg)]
         
-        eeg_out = (eeg_out-lower) / (upper-lower)
-        for sample in range(eeg.shape[0]):
-            for time in range(eeg.shape[2]):
-                eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
-        
-        # Common average ref & min-max scaling
-        # m, s = [np.mean(eeg), np.std(eeg)]
-        # eeg_out = (eeg_out-m) / s
+        # eeg_out = (eeg_out-lower) / (upper-lower)
         # for sample in range(eeg.shape[0]):
         #     for time in range(eeg.shape[2]):
         #         eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
+        
 
+        for sample, eeg_sample in enumerate(eeg):
+            eeg_out[sample] = self.robust_minmax_scaler(eeg_sample)
+            # Common average ref:
+            for time in range(eeg_sample.shape[-1]):
+                eeg_out[sample][:, time] -= np.mean(eeg_sample[:, time])
         return eeg_out
-            
+    
 
     def scale_source(self, source):
         ''' Scales the sources prior to training the neural network.
@@ -433,12 +450,16 @@ class Net:
         #     for time in range(source.shape[2]):
         #         # source_out[sample, :, time] /= source_out[sample, :, time].std()
         #         source_out[sample, :, time] /= np.max(np.abs(source_out[sample, :, time]))
-        for sample in range(source.shape[0]):
+        for sample, _ in enumerate(source):
             # source_out[sample, :, time] /= source_out[sample, :, time].std()
             source_out[sample] /= np.max(np.abs(source_out[sample]))
 
         return source_out
             
+    @staticmethod
+    def robust_minmax_scaler(eeg):
+        lower, upper = [np.percentile(eeg, 25), np.percentile(eeg, 75)]
+        return (eeg-lower) / (upper-lower)
 
     def predict(self, *args):
         ''' Predict sources from EEG data.
@@ -482,17 +503,23 @@ class Net:
             sfreq = eeg.info['sfreq']
             tmin = eeg.tmin
             eeg = eeg._data
-        else:
-            msg = f'eeg must be of type <mne.EvokedArray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
-            raise ValueError(msg)
+        elif isinstance(eeg, list) and isinstance(eeg[0], util.EPOCH_INSTANCES):
+            sfreq = eeg[0].info['sfreq']
+            tmin = eeg[0].tmin
+            eeg = [e.get_data()[0] for e in eeg]
+            
+        # else:
+        #     msg = f'eeg must be of type <mne.EvokedArray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
+        #     raise ValueError(msg)
         # Prepare EEG to ensure common average reference and appropriate scaling
         # eeg_prep =  self._prep_eeg(eeg)
         eeg_prep = self.scale_eeg(eeg)
         
         # Reshape to (samples, time, channels)
-        eeg_prep = np.swapaxes(eeg_prep, 1,2)
+        eeg_prep = [np.swapaxes(e, 0, 1) for e in eeg_prep]
 
         # Predicted sources all in one go
+        # print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
         predicted_sources = self.predict_sources(eeg_prep)       
 
         # Rescale Predicitons
@@ -501,15 +528,12 @@ class Net:
 
 
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
-        if predicted_sources.shape[-1] == 1:
-            predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[:, :, 0], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)]
-        else:    
-            predicted_source_estimate = [util.source_to_sourceEstimate(predicted_sources_scaled[k], self.fwd, sfreq=sfreq, tmin=tmin, subject=self.subject)
-                    for k in range(predicted_sources_scaled.shape[0])]
         
-
-        if len(predicted_source_estimate) == 1:
-            predicted_source_estimate = predicted_source_estimate[0]
+        predicted_source_estimate = [
+            util.source_to_sourceEstimate(predicted_source_scaled, self.fwd, \
+                sfreq=sfreq, tmin=tmin, subject=self.subject) \
+                for predicted_source_scaled in predicted_sources_scaled]
+        
         return predicted_source_estimate
 
     def predict_sources(self, eeg):
@@ -521,23 +545,13 @@ class Net:
         eeg : numpy.ndarray
             3D numpy array of EEG data (samples, channels, time)
         '''
-        assert len(eeg.shape)==3, 'eeg must be a 3D numpy array of dim (samples, channels, time)'
-        if not self.temporal:
-            # Predict sources all at once
-            n_samples, n_time, n_elec = eeg.shape
-            ## reshape axis
-            new_shape = (n_samples*n_time, n_elec)
-            eeg_tmp = eeg.reshape(new_shape)
-            ## predict
+        assert len(eeg[0].shape)==2, 'eeg must be a list of 2D numpy array of dim (channels, time)'
+
+        predicted_sources = [self.model.predict(e[np.newaxis, :, :])[0] for e in eeg]
             
-            predicted_sources = self.model.predict(eeg_tmp)
-            
-            ## Get to old shape
-            predicted_sources = predicted_sources.reshape(n_samples, n_time, self.n_dipoles)
-        else:
-            predicted_sources = self.model.predict(eeg)
-            
-        predicted_sources = np.swapaxes(predicted_sources,1,2)
+        # predicted_sources = np.swapaxes(predicted_sources,1,2)
+        predicted_sources = [np.swapaxes(src, 0, 1) for src in predicted_sources]
+        # print("shape of predicted sources: ", predicted_sources[0].shape)
 
         return predicted_sources
 
@@ -545,13 +559,15 @@ class Net:
         ''' Wrapper for parallel (or, alternatively, serial) scaling of 
         predicted sources.
         '''
-        assert len(y_est.shape) == 3, 'Sources must be 3-Dimensional'
-        assert len(x_true.shape) == 3, 'EEG must be 3-Dimensional'
+
+        # assert len(y_est[0].shape) == 3, 'Sources must be 3-Dimensional'
+        # assert len(x_true.shape) == 3, 'EEG must be 3-Dimensional'
         y_est_scaled = deepcopy(y_est)
 
-        for trial in range(x_true.shape[0]):
-            for time in range(x_true.shape[2]):
-                y_est_scaled[trial, :, time] = self.scale_p(y_est[trial, :, time], x_true[trial, :, time])
+        for trial, _ in enumerate(x_true):
+            for time in range(x_true[trial].shape[-1]):
+                scaled = self.scale_p(y_est[trial][:, time], x_true[trial][:, time])
+                y_est_scaled[trial][:, time] = scaled
 
         return y_est_scaled
 
@@ -885,12 +901,12 @@ class Net:
             return
         
         # Else assure that channels are appropriate
-        if eeg.ch_names != self.fwd.ch_names:
-            self.fwd = self.fwd.pick_channels(eeg.ch_names)
+        if eeg[0].ch_names != self.fwd.ch_names:
+            self.fwd = self.fwd.pick_channels(eeg[0].ch_names)
             # Write all changes to the attributes
             self._embed_fwd(self.fwd)
         
-        self.n_timepoints = len(eeg.times)
+        self.n_timepoints = len(eeg[0].times)
         # Finally, build model
         self._build_model()
             

@@ -2,6 +2,11 @@ import tensorflow as tf
 from tensorflow.keras import backend as K
 
 
+def combi(y_true, y_pred):
+    error_1 = tf.keras.losses.CosineSimilarity()(y_true, y_pred)
+    error_2 = tf.keras.losses.MeanSquaredError() (y_true, y_pred)
+    return error_1 + error_2
+
 def reg_loss(reg=0.1):
     reg = tf.cast(reg, tf.float32)
     def mse(y_true, y_pred):

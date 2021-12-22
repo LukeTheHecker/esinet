@@ -98,12 +98,17 @@ def source_to_sourceEstimate(data, fwd, sfreq=1, subject='fsaverage',
 def eeg_to_Epochs(data, pth_fwd, info=None):
     if info is None:
         info = load_info(pth_fwd)
-
-    epochs = mne.EpochsArray(data, info, verbose=0)
     
-    # Rereference to common average if its not the case
-    if int(epochs.info['custom_ref_applied']) != 0:
-        epochs.set_eeg_reference('average', projection=True, verbose=0)
+    # if np.all( np.array([d.shape[-1] for d in data]) == data[0].shape[-1]):
+    #     epochs = mne.EpochsArray(data, info, verbose=0)
+    #     # Rereference to common average if its not the case
+    #     if int(epochs.info['custom_ref_applied']) != 0:
+    #         epochs.set_eeg_reference('average', projection=True, verbose=0)
+    #     epochs = [epochs]
+    # else:
+    epochs = [mne.EpochsArray(d[np.newaxis, :, :], info, verbose=0).set_eeg_reference('average', projection=True, verbose=0) for d in data]
+    
+    
     
     return epochs
 
@@ -410,7 +415,8 @@ def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, tmax=0, parallel=True)
         samples of a esinet.Simulation object
     '''
     eeg, sources = net.Net._handle_data_input((sim,))
-    n_samples = eeg.get_data().shape[0]
+    
+    n_samples = sim.n_samples
     
     if n_samples < 4:
         parallel = False
@@ -556,7 +562,7 @@ def batch_nmse(y_true, y_pred):
     return nmse
 
 def batch_corr(y_true, y_pred):
-    y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
-    y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
+    # y_true = np.stack([y/np.abs(y).max() for y in y_true.T], axis=1)
+    # y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
     r, _ = pearsonr(y_true.flatten(), y_pred.flatten())
     return r

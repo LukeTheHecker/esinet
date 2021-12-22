@@ -6,7 +6,9 @@ from scipy.spatial.distance import cdist
 import dill as pkl
 import random
 from joblib import Parallel, delayed
-from tqdm.notebook import tqdm
+# from tqdm.notebook import tqdm
+from tqdm import tqdm
+
 import colorednoise as cn
 import mne
 from time import time
@@ -88,7 +90,16 @@ class Simulation:
         _, _, self.pos, _ = util.unpack_fwd(self.fwd)
         self.distance_matrix = cdist(self.pos, self.pos)
     
-    
+    def __add__(self, other):
+        new_object = deepcopy(self)
+        new_object.source_data.extend(other.source_data)
+        new_object.eeg_data.extend(other.eeg_data)
+        new_object.simulation_info.append(other.simulation_info)
+        new_object.n_samples += other.n_samples
+        if new_object.settings["method"] != other.settings["method"]:
+            new_object.settings["method"] = "mixed"
+        return new_object
+        
     def check_info(self, info):
         self.info = info.pick_channels(self.fwd.ch_names, ordered=True)
 
@@ -109,10 +120,9 @@ class Simulation:
     
     def simulate_sources(self, n_samples):
 
-        n_time = np.clip(int(self.info['sfreq'] * self.settings['duration_of_trial']), a_min=1, a_max=np.inf).astype(int)
         n_dip = self.pos.shape[0]
-        source_data = np.zeros((n_samples, n_dip, n_time), dtype=np.float32)
-
+        # source_data = np.zeros((n_samples, n_dip, n_time), dtype=np.float32)
+        source_data = []
         if self.verbose:
                 print(f'Simulate Source')
 
@@ -122,10 +132,10 @@ class Simulation:
             if self.parallel:
                 source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
                     (delayed(self.simulate_source)() 
-                    for _ in tqdm(range(n_samples))))
+                    for _ in tqdm(range(n_samples))), dtype=object)
             else:
                 for i in tqdm(range(n_samples)):
-                    source_data[i] = self.simulate_source()
+                    source_data.append( self.simulate_source() )
             
         elif self.settings["method"] == "noise":
             print("Simulating data based on 1/f noise.")
@@ -133,39 +143,41 @@ class Simulation:
             if self.parallel:
                 source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
                     (delayed(self.simulate_source_noise)() 
-                    for _ in tqdm(range(n_samples))))
+                    for _ in tqdm(range(n_samples))), dtype=object)
             else:
                 for i in tqdm(range(n_samples)):
-                    source_data[i] = self.simulate_source_noise(n_time)
-
+                    source_data.append( self.simulate_source_noise() )
         elif self.settings["method"] == "mixed":
             print("Simulating data based on 1/f noise and sparse patches.")
             self.prepare_grid()
             if self.parallel:
                 source_data_tmp = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
                     (delayed(self.simulate_source_noise)() 
-                    for _ in tqdm(range(int(n_samples/2)))))
-                source_data[:int(n_samples/2)] = source_data_tmp
+                    for _ in tqdm(range(int(n_samples/2)))), dtype=object)
+                for single_source in source_data_tmp:
+                    source_data.append( single_source )
                 source_data_tmp = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
                     (delayed(self.simulate_source)() 
-                    for _ in tqdm(range(int(n_samples/2), n_samples))))
-                source_data[int(n_samples/2):] = source_data_tmp
+                    for _ in tqdm(range(int(n_samples/2), n_samples))), dtype=object)
+
+                for single_source in source_data_tmp:
+                    source_data.append( single_source )
             else:
                 for i in tqdm(range(int(n_samples/2))):
-                    source_data[i] = self.simulate_source_noise(n_time)
+                    source_data.append( self.simulate_source_noise() )
                 for i in tqdm(range(int(n_samples/2), n_samples)):
-                    source_data[i] = self.simulate_source()
+                    source_data.append( self.simulate_source() )
                     
 
         # Convert to mne.SourceEstimate
         if self.verbose:
             print(f'Converting Source Data to mne.SourceEstimate object')
-        if self.settings['duration_of_trial'] == 0:
-            sources = util.source_to_sourceEstimate(source_data, self.fwd, 
-                sfreq=self.settings['sample_frequency'], subject=self.subject) 
-        else:
-            sources = self.sources_to_sourceEstimates(source_data)
-        
+        # if self.settings['duration_of_trial'] == 0:
+        #     sources = util.source_to_sourceEstimate(source_data, self.fwd, 
+        #         sfreq=self.settings['sample_frequency'], subject=self.subject) 
+        # else:
+        sources = self.sources_to_sourceEstimates(source_data)
+        # print('Here y go: ', type(sources), sources)
         return sources
 
     def prepare_grid(self):
@@ -196,8 +208,11 @@ class Simulation:
         }
         
 
-    def simulate_source_noise(self, n_time):
+    def simulate_source_noise(self):
         src_3d = util.create_n_dim_noise(self.grid["shape"], exponent=self.grid["exponent"])
+        duration_of_trial = self.get_from_range(
+            self.settings['duration_of_trial'], dtype=float)
+        # print("duration_of_trial: ", duration_of_trial)
         if len(src_3d.shape) == 3:
             src_3d = src_3d[:,:,:,np.newaxis]
         src = np.zeros((1284, n_time))
@@ -282,28 +297,23 @@ class Simulation:
         
         src_centers = np.random.choice(np.arange(self.pos.shape[0]), \
             number_of_sources, replace=False)
-
-        if self.settings['duration_of_trial'] > 0:
-            signal_length = int(self.settings['sample_frequency']*self.settings['duration_of_trial'])
-            pulselen = self.settings['sample_frequency']/10
-            # pulse = self.get_pulse(pulselen)
-            
+        duration_of_trial = self.get_from_range(
+            self.settings['duration_of_trial'], dtype=float
+        )
+        signal_length = int(round(self.settings['sample_frequency']*duration_of_trial))
+        # print(signal_length)
+        if signal_length > 1:
             signals = []
             for _ in range(number_of_sources):
                 signal = cn.powerlaw_psd_gaussian(self.get_from_range(self.settings['beta'], dtype=float), signal_length) 
-                # Old: have positive source values
-                # signal += np.abs(np.min(signal))
-                # signal /= np.max(signal)
-                # New:
                 signal /= np.max(np.abs(signal))
-
                 signals.append(signal)
             
             sample_frequency = self.settings['sample_frequency']
         else:  # else its a single instance
             sample_frequency = 0
             signal_length = 1
-            signals = [np.array([1])]*number_of_sources
+            signals = list(np.random.choice([-1, 1], number_of_sources))
         
         
         # sourceMask = np.zeros((self.pos.shape[0]))
@@ -321,7 +331,11 @@ class Simulation:
                 activity = np.expand_dims(util.gaussian(dists, 0, sd) * amplitude, axis=1) * signal
                 source += activity
             elif shape == 'flat':
-                activity = util.repeat_newcol(amplitude * signal, len(d)).T
+                if not isinstance(signal, (list, np.ndarray)):
+                    signal = np.array([signal])
+                    activity = util.repeat_newcol(amplitude * signal, len(d)).T[:, np.newaxis]
+                else:
+                    activity = util.repeat_newcol(amplitude * signal, len(d)).T
                 if len(activity.shape) == 1:
                     if len(d) == 1:
                         activity = np.expand_dims(activity, axis=0)    
@@ -370,22 +384,23 @@ class Simulation:
          
         # Desired Dim of sources: (samples x dipoles x time points)
         # unpack numpy array of source data
-        if isinstance(self.source_data, (list, tuple)):
-            sources = np.stack([source.data for source in self.source_data], axis=0)
-        else:
-            sources = self.source_data.data.T
+        # print(type(self.source_data))
+        # if isinstance(self.source_data, (list, tuple)):
+        #     sources = np.stack([source.data for source in self.source_data], axis=0)
+        # else:
+        #     sources = self.source_data.data.T
 
         # if there is no temporal dimension...
-        if len(sources.shape) < 3:
-            # ...add empty temporal dimension
-            sources = np.expand_dims(sources, axis=2)
+        for i, source in enumerate(self.source_data):
+            if len(source.shape) == 1:
+                self.source_data[i] = np.expand_dims(source, axis=-1)
         
-        
+                
 
         # Load some forward model objects
         fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
         n_elec = leadfield.shape[0]
-        n_samples = np.clip(sources.shape[0], a_min=1, a_max=np.inf).astype(int)
+        n_samples = np.clip(len(self.source_data), a_min=1, a_max=np.inf).astype(int)
 
         target_snrs = [self.get_from_range(self.settings['target_snr'], dtype=float) for _ in range(n_samples)]
         betas = [self.get_from_range(self.settings['beta'], dtype=float) for _ in range(n_samples)]
@@ -398,8 +413,8 @@ class Simulation:
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
         if self.verbose:
             print(f'\nProject sources to EEG...')
-        eeg_clean = self.project_sources(sources)
-
+        eeg_clean = self.project_sources(self.source_data)
+        # print(type(eeg_clean), eeg_clean[0].shape)
         if self.verbose:
             print(f'\nCreate EEG trials with noise...')
         if self.parallel:
@@ -408,26 +423,22 @@ class Simulation:
                 target_snrs[sample], betas[sample]) 
                 for sample in tqdm(range(n_samples))), axis=0)
         else:
-            eeg_trials_noisy = np.zeros((eeg_clean.shape[0], n_simulation_trials, *eeg_clean.shape[1:]))
-            
+            # eeg_trials_noisy = np.zeros((eeg_clean.shape[0], n_simulation_trials, *eeg_clean.shape[1:]))
+            eeg_trials_noisy = []
             for sample in tqdm(range(n_samples)):
-                eeg_trials_noisy[sample] = self.create_eeg_helper(eeg_clean[sample], 
+                eeg_trials_noisy.append( self.create_eeg_helper(eeg_clean[sample], 
                     n_simulation_trials, target_snrs[sample], betas[sample]) 
-             
-        if n_simulation_trials == 1 and len(eeg_trials_noisy.shape) == 2:
-            # Add empty dimension to contain the single trial
-            eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=1)
-
-        
-        if len(eeg_trials_noisy.shape) == 3:
-            eeg_trials_noisy = np.expand_dims(eeg_trials_noisy, axis=-1)
-            
-        if eeg_trials_noisy.shape[2] != n_elec:
-            eeg_trials_noisy = np.swapaxes(eeg_trials_noisy, 1, 2)
+                )
+        # print(type(eeg_trials_noisy), eeg_trials_noisy[0].shape)
+        for i, eeg_trial_noisy in enumerate(eeg_trials_noisy):
+            if len(eeg_trial_noisy.shape) == 2:
+                eeg_trials_noisy[i] = np.expand_dims(eeg_trial_noisy, axis=-1)
+            if eeg_trial_noisy.shape[1] != n_elec:
+                eeg_trials_noisy[i] = np.swapaxes(eeg_trial_noisy, 1, 2)
         
         if self.verbose:
             print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
-        ERP_samples_noisy = np.mean(eeg_trials_noisy, axis=1)
+        ERP_samples_noisy = [np.mean(eeg_trial_noisy, axis=0) for eeg_trial_noisy in eeg_trials_noisy]
         epochs = util.eeg_to_Epochs(ERP_samples_noisy, fwd_fixed, info=self.info)
 
         return epochs
@@ -500,28 +511,23 @@ class Simulation:
 
         '''
         fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
-        n_samples, n_dipoles, n_timepoints = sources.shape
-        n_elec = leadfield.shape[0]
-        eeg = np.zeros((n_samples, n_elec, n_timepoints))
-
+        n_samples = len(sources)
+        # n_elec, n_dipoles = leadfield.shape
+        # eeg = np.zeros((n_samples, n_elec, n_timepoints))
+        eeg = []
         # Swap axes to dipoles, samples, time_points
-        sources_tmp = np.swapaxes(sources, 0,1)
+        # sources_tmp = np.swapaxes(sources, 0,1)
         # Collapse last two dims into one
-        short_shape = (sources_tmp.shape[0], 
-            sources_tmp.shape[1]*sources_tmp.shape[2])
-        sources_tmp = sources_tmp.reshape(short_shape)
-        # Scale to allow for lower precision
-        # scaler = 1/sources_tmp.max()
-        # sources_tmp *= scaler
-        # Perform Matmul
-        # result = np.matmul(
-        #     leadfield.astype(np.float32), sources_tmp.astype(np.float32))
-        result = np.matmul(leadfield, sources_tmp)
+        # short_shape = (sources_tmp.shape[0], 
+            # sources_tmp.shape[1]*sources_tmp.shape[2])
+        # sources_tmp = sources_tmp.reshape(short_shape)
+
+        result = [np.matmul(leadfield, src.data) for src in sources]
         
         # Reshape result
-        result = result.reshape(result.shape[0], n_samples, n_timepoints)
+        # result = result.reshape(result.shape[0], n_samples, n_timepoints)
         # swap axes to correct order
-        result = np.swapaxes(result,0,1)
+        # result = np.swapaxes(result,0,1)
         # Rescale
         # result /= scaler
         return result
@@ -702,16 +708,41 @@ class Simulation:
         n_samples = len(epochs)
 
         # Shuffle everything
-        new_order = np.arange(n_samples)
+        new_order = np.arange(n_samples).astype(int)
         np.random.shuffle(new_order)
-        epochs = epochs[new_order]
         
-        if type(sources) == list:
-            sources = list(np.array(sources)[new_order])
-
+        epochs = [epochs[i] for i in new_order]
+        sources = [sources[i] for i in new_order]
+        
         df = df.reindex(new_order)
 
         # store back
         self.eeg_data = epochs
         self.source_data = sources
         self.simulation_info = df
+    def crop(self, tmin=None, tmax=None, include_tmax=False, verbose=0):
+        eeg_data = []
+        source_data = []
+        for i in range(self.n_samples):
+            # print(self.eeg_data[i].tmax, tmax)
+            cropped_source = self.source_data[i].crop(tmin=tmin, tmax=tmax, include_tmax=include_tmax)
+            cropped_eeg = self.eeg_data[i].crop(tmin=tmin, tmax=tmax, include_tmax=include_tmax, verbose=verbose)
+            min_crop = (1/cropped_source.sfreq)
+            while len(cropped_source.times) > len(cropped_eeg.times):
+
+                # print(f"cropping: {len(cropped_source.times)}")
+                tmax -= min_crop
+                cropped_source = cropped_source.crop(tmin=tmin, tmax=tmax-min_crop)
+                # print(f"cropped: {len(cropped_source.times)}")
+
+
+            source_data.append( cropped_source )
+            eeg_data.append( cropped_eeg )
+
+        
+        self.source_data = source_data
+        self.eeg_data = eeg_data
+
+        return self
+
+
