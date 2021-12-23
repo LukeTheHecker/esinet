@@ -40,14 +40,14 @@ def test_simulation( number_of_sources, extents, amplitudes,
 
 
 def test_simulation_add():
-    sim_a = simulation.Simulation(fwd, info, settings=settings).simulate(n_samples=2)
-    sim_b = simulation.Simulation(fwd, info, settings=settings).simulate(n_samples=2)
+    sim_a = simulation.Simulation(fwd, info).simulate(n_samples=2)
+    sim_b = simulation.Simulation(fwd, info).simulate(n_samples=2)
     sim_c = sim_a + sim_b
     
 
 def create_forward_model_test(pth_fwd='temp/ico2/', sampling='ico2'):
     # Create a forward model
-    create_forward_model(pth_fwd, sampling=sampling)
+    forward.create_forward_model(pth_fwd, sampling=sampling)
     info = forward.get_info()
     info['sfreq'] = 100
     fwd = forward.create_forward_model(info=info)

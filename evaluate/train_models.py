@@ -1,4 +1,4 @@
-import sys; sys.path.insert(0, r'C:\Users\lukas\Dokumente\projects\esinet')
+import sys; sys.path.insert(0, '..\\')
 import pickle as pkl
 import numpy as np
 from copy import deepcopy
@@ -56,6 +56,7 @@ batch_size = 8
 validation_split = 0.05
 validation_freq = 2 
 optimizer = tf.keras.optimizers.Adam() 
+device = '/GPU:0'
 ########################################################################
 
 
@@ -66,7 +67,8 @@ model_params = dict(n_dense_layers=2, n_dense_units=200,
 train_params = dict(epochs=epochs, patience=patience, loss=loss, 
     optimizer=optimizer, return_history=True, 
     metrics=[tf.keras.losses.mean_squared_error], batch_size=batch_size,
-    validation_freq=validation_freq, validation_split=validation_split)
+    validation_freq=validation_freq, validation_split=validation_split,
+    device=device)
 # Train
 net_dense = Net(fwd, **model_params)
 _, history_dense = net_dense.fit(sim_lstm, **train_params)
@@ -82,7 +84,7 @@ model_params = dict(n_lstm_layers=2,
 train_params = dict(epochs=epochs, patience=patience, loss=loss, 
     optimizer=optimizer, return_history=True, 
     metrics=[tf.keras.losses.mean_squared_error], batch_size=batch_size, 
-    device='/CPU:0', validation_freq=validation_freq, 
+    device=device, validation_freq=validation_freq, 
     validation_split=validation_split)
 # Train
 net_lstm = Net(fwd, **model_params)
@@ -93,7 +95,7 @@ net_lstm.model.compile(optimizer='adam', loss='mean_squared_error')
 
 
 ########################################################################
-Save
+# Save
 models = [net_dense, net_lstm]
 model_names = ['Dense', 'LSTM']
 net_dense.save(r'models', name='dense-net_1-1000points_standard-cosine-mse')
