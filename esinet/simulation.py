@@ -18,7 +18,7 @@ DEFAULT_SETTINGS = {
     'method': 'standard',
     'number_of_sources': (1, 10),
     # 'extents':  lambda: ((np.random.randn(1)/3.2)+17.2)[0], # (1, 50),
-    'extents':  (20,40),
+    'extents':  (5,40),
     'amplitudes': (1, 10),
     'shapes': 'both',
     'duration_of_trial': 1.0,

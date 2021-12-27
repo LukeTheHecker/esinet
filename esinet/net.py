@@ -884,7 +884,7 @@ class Net:
             self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
         
         if not isinstance(self.dropout, (tuple, list)):
-            dropout = [self.dropout]*self.n_dense_layers
+            dropout = [self.dropout]*(self.n_dense_layers+self.n_lstm_layers)
         else:
             dropout = self.dropout
 
