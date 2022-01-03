@@ -95,7 +95,7 @@ def source_to_sourceEstimate(data, fwd, sfreq=1, subject='fsaverage',
 
     return src
 
-def eeg_to_Epochs(data, pth_fwd, info=None):
+def eeg_to_Epochs(data, pth_fwd, info=None, parallel=False):
     if info is None:
         info = load_info(pth_fwd)
     
@@ -106,7 +106,11 @@ def eeg_to_Epochs(data, pth_fwd, info=None):
     #         epochs.set_eeg_reference('average', projection=True, verbose=0)
     #     epochs = [epochs]
     # else:
-    epochs = [mne.EpochsArray(d[np.newaxis, :, :], info, verbose=0).set_eeg_reference('average', projection=True, verbose=0) for d in data]
+    if parallel:
+        epochs = Parallel(n_jobs=-1, backend='loky')(delayed(mne.EpochsArray)(d[np.newaxis, :, :], info, verbose=0) for d in data)  
+        epochs = Parallel(n_jobs=-1, backend='loky')(delayed(epoch.set_eeg_reference)('average', projection=True, verbose=0) for epoch in epochs)
+    else:
+        epochs = [mne.EpochsArray(d[np.newaxis, :, :], info, verbose=0).set_eeg_reference('average', projection=True, verbose=0) for d in data]
     
     
     
@@ -543,7 +547,7 @@ def create_n_dim_noise(shape, exponent=4):
         # pinked_fft = signal_fft / np.sqrt( ((freqs[0]**exponent)[:, np.newaxis, np.newaxis]+(freqs[1]**exponent)[np.newaxis, :, np.newaxis]+(freqs[2]**exponent)[np.newaxis, np.newaxis, :]))
         pinked_fft = signal_fft /  ((freqs[0]**exponent)[:, np.newaxis, np.newaxis, np.newaxis]+(freqs[1]**exponent)[np.newaxis, :, np.newaxis, np.newaxis]+(freqs[2]**exponent)[np.newaxis, np.newaxis, :, np.newaxis]+(freqs[3]**exponent)[np.newaxis, np.newaxis, np.newaxis, :])
     pink = np.fft.ifftn(pinked_fft).real
-    return np.squeeze(pink)
+    return pink
 
 def vol_to_src(neighbor_indices, src_3d, pos):
     '''Interpolate a 3D source to a irregular grid using k-nearest 

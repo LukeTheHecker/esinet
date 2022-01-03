@@ -1,4 +1,7 @@
 import mne
+from mne.viz.topomap import (_setup_interp, _make_head_outlines, _check_sphere, 
+    _check_extrapolate)
+from mne.channels.layout import _find_topomap_coords
 import os
 import tensorflow as tf
 from tensorflow import keras
@@ -18,6 +21,7 @@ import numpy as np
 from scipy.stats import pearsonr
 from copy import deepcopy
 from time import time
+from tqdm import tqdm
 
 from . import util
 from . import evaluate
@@ -57,7 +61,8 @@ class Net:
     
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
         n_dense_units=100, n_lstm_units=75, activation_function='relu', 
-        n_jobs=-1, model_type='auto', verbose=True):
+        n_filters=8, kernel_size=(3,3), n_jobs=-1, model_type='auto', 
+        verbose=True):
 
         self._embed_fwd(fwd)
         
@@ -66,6 +71,8 @@ class Net:
         self.n_dense_units = n_dense_units
         self.n_lstm_units = n_lstm_units
         self.activation_function = activation_function
+        self.n_filters = n_filters
+        self.kernel_size = kernel_size
         # self.default_loss = tf.keras.losses.Huber(delta=delta)
         self.default_loss = 'mean_squared_error'  # losses.weighted_huber_loss
         # self.parallel = parallel
@@ -87,7 +94,7 @@ class Net:
         self.leadfield = leadfield
         self.n_channels = leadfield.shape[0]
         self.n_dipoles = leadfield.shape[1]
-        self.interp_channel_shape = (11,11)
+        self.interp_channel_shape = (9,9)
     
     @staticmethod
     def _handle_data_input(arguments):
@@ -217,44 +224,29 @@ class Net:
             self.compiled = True
         # print("shapes before fit: ", x_scaled.shape, y_scaled.shape)
         
-        print("fit model")
-        def generate_batches(x, y, batch_size):
-            # print("len x: ", len(x), type(x), type(x[0]), x[0].shape)
-            # print("len y: ", len(y),  type(y), type(y[0]), y[0].shape)
-            n_batches = int(len(x) / batch_size)
-            x = x[:int(n_batches*batch_size)]
-            y = y[:int(n_batches*batch_size)]
-            
-            time_lengths = [x_let.shape[-2] for x_let in x]
-            idc = list(np.argsort(time_lengths).astype(int))
-            # print("len idc: ", len(idc), " idc: ", idc)
-            
-            x = [x[i] for i in idc]
-            y = [y[i] for i in idc]
-            while True:
-                x_pad = []
-                y_pad = []
-                for batch in range(n_batches):
-                    # print(batch, len(x), batch*batch_size, (batch+1)*batch_size, x[batch*batch_size:(batch+1)*batch_size])
-                    x_padlet = pad_sequences( x[batch*batch_size:(batch+1)*batch_size], dtype='float32' )
-                    y_padlet = pad_sequences( y[batch*batch_size:(batch+1)*batch_size], dtype='float32' )
-                    
-                    
-                    x_pad.append( x_padlet )
-                    y_pad.append( y_padlet )
-                
-                new_order = np.arange(len(x_pad))
-                np.random.shuffle(new_order)
-                x_pad = [x_pad[i] for i in new_order]
-                y_pad = [y_pad[i] for i in new_order]
-                for x_padlet, y_padlet in zip(x_pad, y_pad):
-                    # print(x_padlet.shape, y_padlet.shape, x_padlet[0,:], y_padlet[0,:])
-                    yield (x_padlet, y_padlet)
         
+        if self.model_type.lower() == 'convdip':
+            print("interpolating for convdip...")
+            elec_pos = _find_topomap_coords(self.info, self.info.ch_names)
+            interpolator = self.make_interpolator(elec_pos, res=self.interp_channel_shape[0])
+            x_scaled_interp = deepcopy(x_scaled)
+            for i, sample in tqdm(enumerate(x_scaled)):
+                list_of_time_slices = []
+                for time_slice in sample:
+                    time_slice_interp = interpolator.set_values(time_slice)()[::-1]
+                    time_slice_interp = time_slice_interp[:, :, np.newaxis]
+                    list_of_time_slices.append(time_slice_interp)
+                x_scaled_interp[i] = np.stack(list_of_time_slices, axis=0)
+                x_scaled_interp[i][np.isnan(x_scaled_interp[i])] = 0
+            x_scaled = x_scaled_interp
+            del x_scaled_interp
+            print("\t...done")
+            
+        print("fit model")
         n_samples = len(x_scaled)
         stop_idx = int(round(n_samples * (1-validation_split)))
-        gen = generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size)
-        steps_per_epoch = (n_samples*(1-validation_split)) / batch_size
+        gen = self.generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size)
+        steps_per_epoch = stop_idx // batch_size
         validation_data = (pad_sequences(x_scaled[stop_idx:], dtype='float32'), pad_sequences(y_scaled[stop_idx:], dtype='float32'))
         if device is None:
             # history = self.model.fit(x_scaled, y_scaled, 
@@ -285,6 +277,38 @@ class Net:
             return self, history
         else:
             return self
+    @staticmethod
+    def generate_batches(x, y, batch_size):
+
+            n_batches = int(len(x) / batch_size)
+            x = x[:int(n_batches*batch_size)]
+            y = y[:int(n_batches*batch_size)]
+            
+            time_lengths = [x_let.shape[0] for x_let in x]
+            idc = list(np.argsort(time_lengths).astype(int))
+            # print("len idc: ", len(idc), " idc: ", idc)
+            
+            x = [x[i] for i in idc]
+            y = [y[i] for i in idc]
+            while True:
+                x_pad = []
+                y_pad = []
+                for batch in range(n_batches):
+                    # print(batch, len(x), batch*batch_size, (batch+1)*batch_size, x[batch*batch_size:(batch+1)*batch_size])
+                    x_padlet = pad_sequences( x[batch*batch_size:(batch+1)*batch_size], dtype='float32' )
+                    y_padlet = pad_sequences( y[batch*batch_size:(batch+1)*batch_size], dtype='float32' )
+                    
+                    
+                    x_pad.append( x_padlet )
+                    y_pad.append( y_padlet )
+                
+                new_order = np.arange(len(x_pad))
+                np.random.shuffle(new_order)
+                x_pad = [x_pad[i] for i in new_order]
+                y_pad = [y_pad[i] for i in new_order]
+                for x_padlet, y_padlet in zip(x_pad, y_pad):
+                    yield (x_padlet, y_padlet)
+
 
     def prep_data(self, args,  dropout=0.2):
         ''' Train the neural network using training data (eeg) and labels (sources).
@@ -338,13 +362,10 @@ class Net:
 
         
         eeg, sources = self._handle_data_input(args)
+        self.info = eeg[0].info
         self.subject = sources.subject if type(sources) == mne.SourceEstimate \
             else sources[0].subject
-        # Decide gross model architecture
-        if self.model_type == 'single' or (self.model_type=='auto' and type(sources) != list):
-            self.temporal = False
-        else:
-            self.temporal = True
+
         # Ensure that the forward model has the same 
         # channels as the eeg object
         self._check_model(eeg)
@@ -387,10 +408,9 @@ class Net:
         # LSTM net expects dimensions to be: (samples, time, channels)
         x_scaled = [np.swapaxes(x,0,1) for x in x_scaled]
         y_scaled = [np.swapaxes(y,0,1) for y in y_scaled]
-
-        # x_scaled = pad_sequences(x_scaled, dtype='float32')
-        # y_scaled = pad_sequences(y_scaled, dtype='float32')
         
+        # if self.model_type.lower() == 'convdip':
+        #     x_scaled = [interp(x) for x in x_scaled]
 
 
         return x_scaled, y_scaled
@@ -515,14 +535,32 @@ class Net:
         #     raise ValueError(msg)
         # Prepare EEG to ensure common average reference and appropriate scaling
         # eeg_prep =  self._prep_eeg(eeg)
-        eeg_prep = self.scale_eeg(eeg)
+        eeg_prep = self.scale_eeg(deepcopy(eeg))
         
         # Reshape to (samples, time, channels)
         eeg_prep = [np.swapaxes(e, 0, 1) for e in eeg_prep]
-
-        # Predicted sources all in one go
-        # print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
-        predicted_sources = self.predict_sources(eeg_prep)       
+        
+        if self.model_type.lower() == 'convdip':
+            print("interpolating for convdip...")
+            elec_pos = _find_topomap_coords(self.info, self.info.ch_names)
+            interpolator = self.make_interpolator(elec_pos, res=self.interp_channel_shape[0])
+            eeg_prep_interp = deepcopy(eeg_prep)
+            for i, sample in tqdm(enumerate(eeg_prep)):
+                list_of_time_slices = []
+                for time_slice in sample:
+                    time_slice_interp = interpolator.set_values(time_slice)()[::-1]
+                    time_slice_interp = time_slice_interp[:, :, np.newaxis]
+                    list_of_time_slices.append(time_slice_interp)
+                eeg_prep_interp[i] = np.stack(list_of_time_slices, axis=0)
+                eeg_prep_interp[i][np.isnan(eeg_prep_interp[i])] = 0
+            eeg_prep = eeg_prep_interp
+            del eeg_prep_interp
+            # print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
+            predicted_sources = self.predict_sources_interp(eeg_prep)
+        else:
+            # Predicted sources all in one go
+            # print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
+            predicted_sources = self.predict_sources(eeg_prep)       
 
         # Rescale Predicitons
         # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
@@ -548,6 +586,25 @@ class Net:
             3D numpy array of EEG data (samples, channels, time)
         '''
         assert len(eeg[0].shape)==2, 'eeg must be a list of 2D numpy array of dim (channels, time)'
+
+        predicted_sources = [self.model.predict(e[np.newaxis, :, :])[0] for e in eeg]
+            
+        # predicted_sources = np.swapaxes(predicted_sources,1,2)
+        predicted_sources = [np.swapaxes(src, 0, 1) for src in predicted_sources]
+        # print("shape of predicted sources: ", predicted_sources[0].shape)
+
+        return predicted_sources
+
+    def predict_sources_interp(self, eeg):
+        ''' Predict sources of 3D EEG (samples, channels, time) by reshaping 
+        to speed up the process.
+        
+        Parameters
+        ----------
+        eeg : numpy.ndarray
+            3D numpy array of EEG data (samples, channels, time)
+        '''
+        assert len(eeg[0].shape)==4, 'eeg must be a list of 4D numpy array of dim (time, height, width, 1)'
 
         predicted_sources = [self.model.predict(e[np.newaxis, :, :])[0] for e in eeg]
             
@@ -717,15 +774,10 @@ class Net:
         (1) A simple single hidden layer fully connected ANN for single time instance data
         (2) A LSTM network for spatio-temporal prediction
         '''
-        if (self.temporal and self.model_type=='auto') or self.model_type=='v2':
-            self._build_temporal_model()
-        elif self.model_type.lower() == 'convdip':
+        if self.model_type.lower() == 'convdip':
             self._build_convdip_model()
-        # elif self.temporal and self.model_type=='v3':
-        #     self._build_temporal_model_v3()
-        #     # self._build_attention_model()
         else:
-            self._build_perceptron_model()
+            self._build_temporal_model()
         
 
         if self.verbose:
@@ -734,6 +786,13 @@ class Net:
     def _build_temporal_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
+        if self.n_lstm_layers>0 and self.n_dense_layers>0:
+            name = "Mixed-model"
+        elif self.n_lstm_layers>0 and self.n_dense_layers==0:
+            name = "LSTM-model"
+        else:
+            name = "Dense-model"
+        
         self.model = keras.Sequential(name='LSTM_v2')
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (None, self.n_channels)
@@ -814,29 +873,32 @@ class Net:
     
         
     def _build_convdip_model(self):
-        self.model = keras.Sequential(name='ConvDip')
+        self.model = keras.Sequential(name='ConvDip-model')
         tf.keras.backend.set_image_data_format('channels_last')
         # Some definitions
-        input_shape = (None, self.interp_channel_shape, 1)
-        n_filters = 8
-        kernel_size = (3, 3)
+        input_shape = (None, *self.interp_channel_shape, 1)
+        
 
         # Hidden Dense layer(s):
         if not isinstance(self.n_dense_units, (tuple, list)):
             self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
         
         if not isinstance(self.dropout, (tuple, list)):
-            dropout = [self.dropout]*self.n_dense_layers
+            dropout = [self.dropout]*(self.n_dense_layers+self.n_lstm_layers)
         else:
             dropout = self.dropout
 
         self.model.add(InputLayer(input_shape=input_shape, name='Input'))
-        self.model.add(TimeDistributed(Conv2D(n_filters, kernel_size, activation=self.activation_function)))
+        for i in range(self.n_lstm_layers):
+            self.model.add(TimeDistributed(Conv2D(self.n_filters, self.kernel_size, activation=self.activation_function, name=f"Conv2D_{i}")))
+            self.model.add(Dropout(dropout[i], name=f'Drop_conv2d_{i}'))
+
+
         self.model.add(TimeDistributed(Flatten()))
 
         for i in range(self.n_dense_layers):
-            self.model.add(TimeDistributed(Dense(self.n_dense_units[i], activation=activation, name=f'FC_{i}')))
-            self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
+            self.model.add(TimeDistributed(Dense(self.n_dense_units[i], activation=self.activation_function, name=f'FC_{i}')))
+            self.model.add(Dropout(dropout[i], name=f'Drop_FC_{i}'))
 
         # Outout Layer
         self.model.add(TimeDistributed(Dense(self.n_dipoles, activation='linear'), name='FC_Out'))
@@ -1047,8 +1109,18 @@ class Net:
         
         return self
 
+    @staticmethod
+    def make_interpolator(elec_pos, res=9, ch_type='eeg'):
+        extrapolate = _check_extrapolate('auto', ch_type)
+        sphere = sphere = _check_sphere(None)
+        outlines = 'head'
+        outlines = _make_head_outlines(sphere, elec_pos, outlines, (0., 0.))
+        border = 'mean'
+        extent, Xi, Yi, interpolator = _setup_interp(
+            elec_pos, res, extrapolate, sphere, outlines, border)
+        interpolator.set_locations(Xi, Yi)
 
-
+        return interpolator
 
     
 

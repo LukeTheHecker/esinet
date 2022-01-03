@@ -1,4 +1,4 @@
-import sys; sys.path.insert(0, r'..\..\esinet')
+import sys; sys.path.insert(0, '..\\')
 import pickle as pkl
 import numpy as np
 from copy import deepcopy
@@ -41,10 +41,10 @@ with open(r'simulations/sim_10200_200-1000points.pkl', 'rb') as f:
 # del sim_lstm_short, sim_lstm_long
 # sim_lstm.shuffle()
 
-# if type(duration_of_trial) == tuple:
-#     sim_lstm.save(f'simulations/sim_{sim_lstm.n_samples}_{int(duration_of_trial[0]*100)}-{int(duration_of_trial[1]*100)}points.pkl')
-# else:
-#     sim_lstm.save(f'simulations/sim_{sim_lstmn_samples}_{int(duration_of_trial*100)}points.pkl')
+if type(duration_of_trial) == tuple:
+    sim_lstm.save(f'simulations/sim_{sim_lstm.n_samples}_{int(duration_of_trial[0]*100)}-{int(duration_of_trial[1]*100)}points.pkl')
+else:
+    sim_lstm.save(f'simulations/sim_{sim_lstm.n_samples}_{int(duration_of_trial*100)}points.pkl')
 ########################################################################
 
 
@@ -94,6 +94,21 @@ net_lstm.fit(sim_lstm, **train_params)
 net_lstm.model.compile(optimizer='adam', loss='mean_squared_error')
 ########################################################################
 
+########################################################################
+# ConvDip
+model_params = dict(n_lstm_layers=2, 
+    n_lstm_units=100, n_dense_layers=0, 
+    model_type='v2')
+train_params = dict(epochs=epochs, patience=patience, loss=loss, 
+    optimizer=optimizer, return_history=True, 
+    metrics=[tf.keras.losses.mean_squared_error], batch_size=batch_size, 
+    device=device, validation_freq=validation_freq, 
+    validation_split=validation_split)
+# Train
+net_lstm = Net(fwd, **model_params)
+net_lstm.fit(sim_lstm, **train_params)
+net_lstm.model.compile(optimizer='adam', loss='mean_squared_error')
+########################################################################
 
 
 ########################################################################
