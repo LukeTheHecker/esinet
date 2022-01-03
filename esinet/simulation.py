@@ -17,14 +17,14 @@ from . import util
 DEFAULT_SETTINGS = {
     'method': 'standard',
     'number_of_sources': (1, 10),
-    # 'extents':  lambda: ((np.random.randn(1)/3.2)+17.2)[0], # (1, 50),
     'extents':  (5,40),
     'amplitudes': (1, 10),
     'shapes': 'both',
     'duration_of_trial': 1.0,
     'sample_frequency': 100,
     'target_snr': (2, 20),
-    'beta': (0.5, 1.5),  # (0, 3)
+    'beta': (0.5, 1.5),  # (0, 3),
+    'exponent': 3
 }
 
 class Simulation:
@@ -130,9 +130,9 @@ class Simulation:
         if self.settings["method"] == "standard":
             print("Simulating data based on sparse patches.")
             if self.parallel:
-                source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                source_data = Parallel(n_jobs=self.n_jobs, backend='loky') \
                     (delayed(self.simulate_source)() 
-                    for _ in tqdm(range(n_samples))), dtype=object)
+                    for _ in tqdm(range(n_samples)))
             else:
                 for i in tqdm(range(n_samples)):
                     source_data.append( self.simulate_source() )
@@ -141,9 +141,9 @@ class Simulation:
             print("Simulating data based on 1/f noise.")
             self.prepare_grid()
             if self.parallel:
-                source_data = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                source_data = Parallel(n_jobs=self.n_jobs, backend='loky') \
                     (delayed(self.simulate_source_noise)() 
-                    for _ in tqdm(range(n_samples))), dtype=object)
+                    for _ in tqdm(range(n_samples)))
             else:
                 for i in tqdm(range(n_samples)):
                     source_data.append( self.simulate_source_noise() )
@@ -151,14 +151,14 @@ class Simulation:
             print("Simulating data based on 1/f noise and sparse patches.")
             self.prepare_grid()
             if self.parallel:
-                source_data_tmp = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                source_data_tmp = Parallel(n_jobs=self.n_jobs, backend='loky') \
                     (delayed(self.simulate_source_noise)() 
-                    for _ in tqdm(range(int(n_samples/2)))), dtype=object)
+                    for _ in tqdm(range(int(n_samples/2))))
                 for single_source in source_data_tmp:
                     source_data.append( single_source )
-                source_data_tmp = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
+                source_data_tmp = Parallel(n_jobs=self.n_jobs, backend='loky') \
                     (delayed(self.simulate_source)() 
-                    for _ in tqdm(range(int(n_samples/2), n_samples))), dtype=object)
+                    for _ in tqdm(range(int(n_samples/2), n_samples)))
 
                 for single_source in source_data_tmp:
                     source_data.append( single_source )
@@ -182,7 +182,7 @@ class Simulation:
 
     def prepare_grid(self):
         n = 10
-        n_time = np.clip(int(self.info['sfreq'] * self.settings['duration_of_trial']), a_min=1, a_max=np.inf).astype(int)
+        n_time = np.clip(int(self.info['sfreq'] * np.max(self.settings['duration_of_trial'])), a_min=1, a_max=np.inf).astype(int)
         shape = (n,n,n,n_time)
         
         x = np.linspace(self.pos[:, 0].min(), self.pos[:, 0].max(), num=shape[0])
@@ -198,7 +198,7 @@ class Simulation:
         self.grid = {
             "shape": shape,
             "k_neighbors": k_neighbors,
-            "exponent": 3,
+            "exponent": self.settings["exponent"],
             "x": x,
             "y": y,
             "z": z,
@@ -209,10 +209,13 @@ class Simulation:
         
 
     def simulate_source_noise(self):
-        src_3d = util.create_n_dim_noise(self.grid["shape"], exponent=self.grid["exponent"])
+        exponent = self.get_from_range(self.grid["exponent"], dtype=float)
+        src_3d = util.create_n_dim_noise(self.grid["shape"], exponent=exponent)
+        print("src_3d shape: ", src_3d.shape)
+
         duration_of_trial = self.get_from_range(
             self.settings['duration_of_trial'], dtype=float)
-        # print("duration_of_trial: ", duration_of_trial)
+        n_time = np.clip(int(round(duration_of_trial * self.info['sfreq'])), 1, None)
         if len(src_3d.shape) == 3:
             src_3d = src_3d[:,:,:,np.newaxis]
         src = np.zeros((1284, n_time))
@@ -399,7 +402,7 @@ class Simulation:
         for i, source in enumerate(self.source_data):
             if len(source.shape) == 1:
                 self.source_data[i] = np.expand_dims(source, axis=-1)
-        
+        print('source data shape: ', self.source_data[0].shape, self.source_data[1].shape)
                 
 
         # Load some forward model objects
@@ -422,19 +425,21 @@ class Simulation:
         # print(type(eeg_clean), eeg_clean[0].shape)
         if self.verbose:
             print(f'\nCreate EEG trials with noise...')
-        if self.parallel:
-            eeg_trials_noisy = np.stack(Parallel(n_jobs=self.n_jobs, backend='loky')
-                (delayed(self.create_eeg_helper)(eeg_clean[sample], n_simulation_trials,
-                target_snrs[sample], betas[sample]) 
-                for sample in tqdm(range(n_samples))), axis=0)
-        else:
-            # eeg_trials_noisy = np.zeros((eeg_clean.shape[0], n_simulation_trials, *eeg_clean.shape[1:]))
-            eeg_trials_noisy = []
-            for sample in tqdm(range(n_samples)):
-                eeg_trials_noisy.append( self.create_eeg_helper(eeg_clean[sample], 
-                    n_simulation_trials, target_snrs[sample], betas[sample]) 
-                )
-        # print(type(eeg_trials_noisy), eeg_trials_noisy[0].shape)
+        
+        # Parallel processing was removed since it was extraordinarily slow:
+        # if self.parallel:
+        #     eeg_trials_noisy = Parallel(n_jobs=self.n_jobs, backend='loky') \
+        #         (delayed(self.create_eeg_helper)(eeg_clean[sample], n_simulation_trials,
+        #             target_snrs[sample], betas[sample]) 
+        #         for sample in tqdm(range(n_samples)))
+        # else:
+        # eeg_trials_noisy = np.zeros((eeg_clean.shape[0], n_simulation_trials, *eeg_clean.shape[1:]))
+        
+        eeg_trials_noisy = []
+        for sample in tqdm(range(n_samples)):
+            eeg_trials_noisy.append( self.create_eeg_helper(eeg_clean[sample], 
+                n_simulation_trials, target_snrs[sample], betas[sample]) 
+            )
         for i, eeg_trial_noisy in enumerate(eeg_trials_noisy):
             if len(eeg_trial_noisy.shape) == 2:
                 eeg_trials_noisy[i] = np.expand_dims(eeg_trial_noisy, axis=-1)
@@ -490,7 +495,7 @@ class Simulation:
                 for coil_type in coil_types]
         )
         noise_trial = np.zeros(
-            (eeg_sample.shape[0], eeg_sample.shape[1], eeg_sample.shape[2])
+            eeg_sample.shape
         )
 
         for i, coil_type in enumerate(coil_types_set):
@@ -728,6 +733,8 @@ class Simulation:
     def crop(self, tmin=None, tmax=None, include_tmax=False, verbose=0):
         eeg_data = []
         source_data = []
+        if tmax is None:
+            tmax = self.eeg_data[0].tmax
         for i in range(self.n_samples):
             # print(self.eeg_data[i].tmax, tmax)
             cropped_source = self.source_data[i].crop(tmin=tmin, tmax=tmax, include_tmax=include_tmax)

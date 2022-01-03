@@ -21,8 +21,11 @@ def test_create_info():
 @pytest.mark.parametrize("sample_frequency", [100,])
 @pytest.mark.parametrize("target_snr", [5, ])
 @pytest.mark.parametrize("beta", [1, ])
+@pytest.mark.parametrize("method", ['standard', 'noise', 'mixed'])
+@pytest.mark.parametrize("parallel", [True, False])
 def test_simulation( number_of_sources, extents, amplitudes,
-        shapes, duration_of_trial, sample_frequency, target_snr, beta):
+        shapes, duration_of_trial, sample_frequency, target_snr, beta,
+        method, parallel):
 
     settings = {
             'number_of_sources': number_of_sources,
@@ -32,10 +35,11 @@ def test_simulation( number_of_sources, extents, amplitudes,
             'duration_of_trial': duration_of_trial,
             'sample_frequency': sample_frequency,
             'target_snr': target_snr,
-            'beta': beta
+            'beta': beta,
+            'method': method
         }
 
-    sim = simulation.Simulation(fwd, info, settings=settings)
+    sim = simulation.Simulation(fwd, info, settings=settings, parallel=parallel)
     sim.simulate(n_samples=2)
 
 

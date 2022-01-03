@@ -555,11 +555,11 @@ class Net:
                 eeg_prep_interp[i][np.isnan(eeg_prep_interp[i])] = 0
             eeg_prep = eeg_prep_interp
             del eeg_prep_interp
-            print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
+            # print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
             predicted_sources = self.predict_sources_interp(eeg_prep)
         else:
             # Predicted sources all in one go
-            print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
+            # print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
             predicted_sources = self.predict_sources(eeg_prep)       
 
         # Rescale Predicitons

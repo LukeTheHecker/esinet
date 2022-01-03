@@ -24,12 +24,15 @@ fwd_free = forward.create_forward_model(info=info, fixed_ori=False)
 # Create Data set
 n_samples = 10000
 duration_of_trial = (0.01, 2)
-settings = dict(duration_of_trial=duration_of_trial, method='standard')
+method = 'noise'
+exponent = 3
+
+settings = dict(duration_of_trial=duration_of_trial, method=method)
 sim_short = Simulation(fwd, info, verbose=True, settings=settings).simulate(n_samples=n_samples)
 
 n_samples = 200
 duration_of_trial = (2, 10)
-settings = dict(duration_of_trial=duration_of_trial, method='standard')
+settings = dict(duration_of_trial=duration_of_trial, method=method)
 sim_long = Simulation(fwd, info, verbose=True, settings=settings).simulate(n_samples=n_samples)
 
 print("Adding:")
@@ -37,6 +40,6 @@ sim = sim_short + sim_long
 del sim_short, sim_long
 sim.shuffle()
 
-sim.save(f'simulations/sim_{sim.n_samples}_1-1000points.pkl')
+sim.save(f'simulations/sim_{sim.n_samples}_1-1000points_noise.pkl')
 
 ########################################################################
