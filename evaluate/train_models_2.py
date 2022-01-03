@@ -14,7 +14,7 @@ fwd_free = forward.create_forward_model(info=info, fixed_ori=False)
 
 # Load Data Set
 pth = r'simulations/sim_10200_1-1000points.pkl'
-# pth = r'simulations/sim_10200_1-1000points.pkl'
+# pth = r'simulations/sim_10200_1-1000points_noise.pkl'
 
 with open(pth, 'rb') as f:
     sim = pkl.load(f)
