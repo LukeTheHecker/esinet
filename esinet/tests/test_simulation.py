@@ -21,8 +21,11 @@ def test_create_info():
 @pytest.mark.parametrize("sample_frequency", [100,])
 @pytest.mark.parametrize("target_snr", [5, ])
 @pytest.mark.parametrize("beta", [1, ])
+@pytest.mark.parametrize("method", ['standard', 'noise', 'mixed'])
+@pytest.mark.parametrize("parallel", [True, False])
 def test_simulation( number_of_sources, extents, amplitudes,
-        shapes, duration_of_trial, sample_frequency, target_snr, beta):
+        shapes, duration_of_trial, sample_frequency, target_snr, beta,
+        method, parallel):
 
     settings = {
             'number_of_sources': number_of_sources,
@@ -32,22 +35,23 @@ def test_simulation( number_of_sources, extents, amplitudes,
             'duration_of_trial': duration_of_trial,
             'sample_frequency': sample_frequency,
             'target_snr': target_snr,
-            'beta': beta
+            'beta': beta,
+            'method': method
         }
 
-    sim = simulation.Simulation(fwd, info, settings=settings)
+    sim = simulation.Simulation(fwd, info, settings=settings, parallel=parallel)
     sim.simulate(n_samples=2)
 
 
 def test_simulation_add():
-    sim_a = simulation.Simulation(fwd, info, settings=settings).simulate(n_samples=2)
-    sim_b = simulation.Simulation(fwd, info, settings=settings).simulate(n_samples=2)
+    sim_a = simulation.Simulation(fwd, info).simulate(n_samples=2)
+    sim_b = simulation.Simulation(fwd, info).simulate(n_samples=2)
     sim_c = sim_a + sim_b
     
 
 def create_forward_model_test(pth_fwd='temp/ico2/', sampling='ico2'):
     # Create a forward model
-    create_forward_model(pth_fwd, sampling=sampling)
+    forward.create_forward_model(pth_fwd, sampling=sampling)
     info = forward.get_info()
     info['sfreq'] = 100
     fwd = forward.create_forward_model(info=info)
