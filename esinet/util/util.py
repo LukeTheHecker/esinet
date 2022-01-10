@@ -7,6 +7,7 @@ from copy import deepcopy
 import logging
 from time import time
 from scipy.stats import pearsonr
+from tqdm.notebook import tqdm
 from .. import simulation
 from .. import net
 
@@ -398,8 +399,11 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, verbose=0):
         data_cov = mne.compute_covariance(epochs, method='empirical', verbose=verbose)
         # data_cov = mne.compute_raw_covariance(raw, method='empirical', verbose=verbose)
         # data_cov = mne.cov.regularize(data_cov, raw.info, verbose=verbose)
-        
-        lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm=None, noise_cov=None, verbose=verbose, pick_ori='max-power', rank=None, reduce_rank=False)
+        try:
+            lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm=None, noise_cov=None, verbose=verbose, pick_ori='max-power', rank=None, reduce_rank=False)
+        except:
+            print("reduce rank then..")
+            lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm=None, noise_cov=None, verbose=verbose, pick_ori='max-power', rank=None, reduce_rank=True)
         # stc = mne.beamformer.apply_lcmv_raw(raw, lcmv_filter, verbose=verbose)
         stc = mne.beamformer.apply_lcmv(evoked, lcmv_filter, verbose=verbose)
     else:
@@ -428,12 +432,20 @@ def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, tmax=0, parallel=True)
     if parallel:
         stcs = Parallel(n_jobs=-1, backend="loky") \
             (delayed(mne_inverse)(fwd, eeg[i], method=method, snr=snr, tmax=tmax) \
-            for i in range(n_samples))
+            for i in tqdm(range(n_samples)))
     else:
         stcs = []
     
-        for i in range(n_samples):
-            stc = mne_inverse(fwd, eeg[i], method=method, snr=snr, tmax=tmax)
+        for i in tqdm(range(n_samples)):
+            try:
+                stc = mne_inverse(fwd, eeg[i], method=method, snr=snr, tmax=tmax)
+            except:
+                print(f'{method} didnt work, returning zeros')
+                if i>0:
+                    stc = stcs[0]
+                    stc.data = np.zeros((stc.data.shape[0], len(eeg[i].times)))
+                
+                    
             stcs.append(stc)
     return stcs
 
