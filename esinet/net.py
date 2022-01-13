@@ -62,7 +62,7 @@ class Net:
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
         n_dense_units=100, n_lstm_units=75, activation_function='relu', 
         n_filters=8, kernel_size=(3,3), n_jobs=-1, model_type='auto', 
-        verbose=True):
+        scale_individually=False, verbose=True):
 
         self._embed_fwd(fwd)
         
@@ -79,6 +79,7 @@ class Net:
         self.n_jobs = n_jobs
         self.model_type = model_type
         self.compiled = False
+        self.scale_individually = scale_individually
         self.verbose = verbose
 
     def _embed_fwd(self, fwd):
@@ -430,27 +431,20 @@ class Net:
             Scaled EEG
         '''
         eeg_out = deepcopy(eeg)
-        # Common average ref & unit variance
-        # for sample in range(eeg.shape[0]):
-        #     for time in range(eeg.shape[2]):
-        #         eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
-        #         eeg_out[sample, :, time] /= eeg_out[sample, :, time].std()
         
-        # Common average ref & min-max scaling
-        # lower, upper = [np.percentile(eeg, 25), np.percentile(eeg, 75)]
-        # lower, upper = [np.min(eeg), np.max(eeg)]
-        
-        # eeg_out = (eeg_out-lower) / (upper-lower)
-        # for sample in range(eeg.shape[0]):
-        #     for time in range(eeg.shape[2]):
-        #         eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
-        
-
-        for sample, eeg_sample in enumerate(eeg):
-            eeg_out[sample] = self.robust_minmax_scaler(eeg_sample)
-            # Common average ref:
-            for time in range(eeg_sample.shape[-1]):
-                eeg_out[sample][:, time] -= np.mean(eeg_sample[:, time])
+        if self.scale_individually:
+            for sample, eeg_sample in enumerate(eeg):
+                # Common average ref:
+                for time in range(eeg_sample.shape[-1]):
+                    eeg_out[sample][:, time] -= np.mean(eeg_sample[:, time])
+                    eeg_out[sample][:, time] /= np.max(np.abs(eeg_sample[:, time]))
+                    
+        else:
+            for sample, eeg_sample in enumerate(eeg):
+                eeg_out[sample] = self.robust_minmax_scaler(eeg_sample)
+                # Common average ref:
+                for time in range(eeg_sample.shape[-1]):
+                    eeg_out[sample][:, time] -= np.mean(eeg_sample[:, time])
         return eeg_out
     
 
