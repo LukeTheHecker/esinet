@@ -1,5 +1,6 @@
 import pickle as pkl
 import mne
+from mne.io.constants import FIFF
 import numpy as np
 import os
 from joblib import delayed, Parallel
@@ -149,9 +150,6 @@ def unpack_fwd(fwd):
         The positions of dipoles in the source model
     tris : numpy.ndarray
         The triangles that describe the source mmodel
-    neighbors : numpy.ndarray
-        the neighbors of each dipole in the source model
-
     """
     if fwd['surf_ori']:
         fwd_fixed = fwd
@@ -380,50 +378,100 @@ def get_eeg_from_source(stc, fwd, info, tmin=-0.2):
 
     return mne.EvokedArray(eeg_hat, info, tmin=tmin)
 
-def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, tmax=0, verbose=0):
+def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0, 
+    baseline=(None, None), rank='info', weight_norm=None, 
+    reduce_rank=False, inversion='matrix', pick_ori=None, 
+    reg=0.05, regularize=False,verbose=0):
     ''' Quickly compute inverse solution using MNE methods
     '''
 
-    epochs.set_eeg_reference(projection=True, verbose=verbose).apply_baseline(baseline=(None, None), verbose=verbose)
-    
+    epochs.set_eeg_reference(projection=True, verbose=verbose)#.apply_baseline(baseline=baseline)
     evoked = epochs.average()
     raw = mne.io.RawArray(evoked.data, evoked.info, verbose=verbose)
-    
-    
-    if method.lower()=='beamformer' or method.lower()=='lcmv' or method.lower()=='beamforming':
-        # noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
-        # noise_cov = mne.compute_covariance(epochs, method='empirical', verbose=verbose)
-        # noise_cov = mne.compute_raw_covariance(raw, tmin=None, method='empirical', verbose=verbose)
-        # noise_cov = mne.cov.regularize(noise_cov, raw.info, verbose=verbose)
+    if rank is None:
+        rank = mne.compute_rank(epochs, tol=1e-6, tol_kind='relative', verbose=verbose)
+    estimator = 'empirical'
 
-        data_cov = mne.compute_covariance(epochs, method='empirical', verbose=verbose)
-        # data_cov = mne.compute_raw_covariance(raw, method='empirical', verbose=verbose)
-        # data_cov = mne.cov.regularize(data_cov, raw.info, verbose=verbose)
-        try:
-            lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm=None, noise_cov=None, verbose=verbose, pick_ori='max-power', rank=None, reduce_rank=False)
-        except:
-            print("reduce rank then..")
-            lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=0.05, weight_norm=None, noise_cov=None, verbose=verbose, pick_ori='max-power', rank=None, reduce_rank=True)
-        # stc = mne.beamformer.apply_lcmv_raw(raw, lcmv_filter, verbose=verbose)
-        stc = mne.beamformer.apply_lcmv(evoked, lcmv_filter, verbose=verbose)
+    if not all([v is None for v in baseline]):
+        # print("calcing a good noise covariance", baseline)
+        noise_cov = mne.compute_raw_covariance(
+            raw, tmax=abs(baseline[0]), tmin=0.0, rank=rank, method=estimator,
+            verbose=verbose)
+        
+        
+        # noise_cov = mne.compute_covariance(epochs, method='empirical', 
+        #     tmin=baseline[0], tmax=baseline[1], verbose=verbose, rank='full')
+
     else:
-        noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
+        # noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1),
+        #     verbose=verbose)
+        noise_cov = None
+    if regularize and noise_cov is not None:
+        noise_cov = mne.cov.regularize(noise_cov, epochs.info, rank=rank, 
+            verbose=verbose)
+
+    if method.lower()=='beamformer' or method.lower()=='lcmv' or method.lower()=='beamforming':
+        if baseline[0] is None:
+            tmin = 0
+        else:
+            tmin = abs(baseline[0])
+        print(raw, tmin, rank, estimator)
+        try:
+            data_cov = mne.compute_raw_covariance(raw, tmin=tmin, 
+                tmax=None, rank=rank, method=estimator, verbose=verbose)
+        except:
+            data_cov = mne.compute_covariance(epochs, tmin=0.0, 
+                tmax=None, rank=rank, method=estimator, verbose=verbose)
+        
+        if regularize:
+            data_cov = mne.cov.regularize(data_cov, epochs.info, 
+                rank=rank, verbose=verbose)
+
+        # try:
+
+        
+        lcmv_filter = mne.beamformer.make_lcmv(epochs.info, fwd, data_cov, reg=reg, 
+            weight_norm=weight_norm, noise_cov=noise_cov, verbose=verbose, pick_ori=pick_ori, 
+            rank=rank, reduce_rank=reduce_rank, inversion=inversion)
+        # except:
+        #     print("reduce rank then..")
+        #     lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=reg, 
+        #         weight_norm=weight_norm, noise_cov=noise_cov, verbose=verbose, pick_ori=pick_ori, 
+        #         rank=rank, reduce_rank=reduce_rank, inversion=inversion)
+        stc = mne.beamformer.apply_lcmv(evoked.crop(tmin=0.), lcmv_filter, 
+            max_ori_out='signed', verbose=verbose)
+        # if not all([v is None for v in baseline]):
+        #     print("division")
+        #     stc_base = mne.beamformer.apply_lcmv(evoked.crop(tmax=0.), lcmv_filter, verbose=verbose)
+            
+        #     stc = stc / stc_base.mean()
+        
+    else:
+        # noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
         # noise_cov = mne.cov.regularize(noise_cov, raw.info, verbose=verbose)
         lambda2 = 1. / snr ** 2
         inverse_operator = mne.minimum_norm.make_inverse_operator(
             evoked.info, fwd, noise_cov, loose='auto', depth=None, fixed=True, 
             verbose=verbose)
             
-        stc = mne.minimum_norm.apply_inverse(evoked, inverse_operator, lambda2,
+        stc = mne.minimum_norm.apply_inverse(evoked.crop(tmin=0.), inverse_operator, lambda2,
                                     method=method, return_residual=False, verbose=verbose)
     return stc
 
-def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, tmax=0, parallel=True):
+def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, parallel=True, 
+    add_baseline=False, n_baseline=200, 
+    rank='info', reduce_rank=False, weight_norm=None, inversion='matrix', 
+    pick_ori=None, reg=0.05, regularize=False,):
     ''' Wrapper that calculates inverse solutions to a bunch of simulated
         samples of a esinet.Simulation object
     '''
     eeg, sources = net.Net._handle_data_input((sim,))
-    
+    if add_baseline:
+        eeg = [add_noise_baseline(e, src, fwd, num=n_baseline, verbose=0) for e, src in zip(eeg, sources)]
+        baseline = (eeg[0].tmin, 0)
+    else:
+        baseline = (None, None)
+    # print(eeg)
     n_samples = sim.n_samples
     
     if n_samples < 4:
@@ -431,18 +479,24 @@ def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, tmax=0, parallel=True)
     
     if parallel:
         stcs = Parallel(n_jobs=-1, backend="loky") \
-            (delayed(mne_inverse)(fwd, eeg[i], method=method, snr=snr, tmax=tmax) \
+            (delayed(mne_inverse)(fwd, eeg[i], method=method, snr=snr, 
+                baseline=baseline, rank=rank, weight_norm=weight_norm,
+                reduce_rank=reduce_rank, inversion=inversion, 
+                pick_ori=pick_ori, reg=reg, regularize=regularize) \
             for i in tqdm(range(n_samples)))
     else:
         stcs = []
     
         for i in tqdm(range(n_samples)):
             try:
-                stc = mne_inverse(fwd, eeg[i], method=method, snr=snr, tmax=tmax)
+                stc = mne_inverse(fwd, eeg[i], method=method, snr=snr, 
+                    baseline=baseline, rank=rank, weight_norm=weight_norm,
+                    reduce_rank=reduce_rank, inversion=inversion, 
+                    pick_ori=pick_ori, reg=reg, regularize=regularize)
             except:
                 print(f'{method} didnt work, returning zeros')
                 if i>0:
-                    stc = stcs[0]
+                    stc = deepcopy(stcs[0])
                     stc.data = np.zeros((stc.data.shape[0], len(eeg[i].times)))
                 
                     
@@ -582,3 +636,35 @@ def batch_corr(y_true, y_pred):
     # y_pred = np.stack([y/np.abs(y).max() for y in y_pred.T], axis=1)
     r, _ = pearsonr(y_true.flatten(), y_pred.flatten())
     return r
+
+def add_noise_baseline(eeg, src, fwd, num=50, verbose=0):
+    ''' Adds noise baseline segment to beginning of trial of specified length.
+
+    Parameters
+    ----------
+    eeg : mne.Epochs
+        The mne Epochs object containing a single EEG trial
+    src : mne.SourceEstimate
+        The mne SourceEstimate object corresponding to the eeg
+    fwd: mne.Forward
+        the mne Forward model
+    num : int,
+        Number of data points to add as baseline.
+    verbose : None/ bool
+        Controls verbosity of the function
+    '''
+    
+    noisy_eeg = eeg.get_data()[0]
+    true_eeg = np.matmul(unpack_fwd(fwd)[1], src.data)
+    noise = noisy_eeg - true_eeg
+    if num>=noise.shape[1]:
+        multiplier = np.ceil(num / noise.shape[1]).astype(int)+1
+        noise = np.repeat(noise, multiplier, axis=1)
+    start_idx = np.random.choice(np.arange(0, noise.shape[1]-num))
+    noise_piece = noise[:, start_idx:start_idx+num]
+    new_eeg = np.append(noise_piece, deepcopy(noisy_eeg), axis=1)
+    sr = eeg.info['sfreq']
+    new_eeg = mne.EpochsArray(new_eeg[np.newaxis, :, :], eeg.info, tmin=-num/sr, verbose=verbose)
+    # new_eeg.set_eeg_reference('average', projection=True, verbose=verbose)
+
+    return new_eeg
