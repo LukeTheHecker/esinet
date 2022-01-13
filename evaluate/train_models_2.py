@@ -14,12 +14,9 @@ fwd_free = forward.create_forward_model(info=info, fixed_ori=False)
 
 # Load Data Set
 pth = r'simulations/sim_10200_1-1000points.pkl'
-# pth = r'simulations/sim_10200_1-1000points_noise.pkl'
 
 with open(pth, 'rb') as f:
     sim = pkl.load(f)
-
-
 
 
 ########################################################################
@@ -44,15 +41,15 @@ train_params = dict(epochs=epochs, patience=patience, loss=loss,
 model_params_dict = {
     # "Dense Small": dict(n_dense_layers=2, n_dense_units=70, n_lstm_layers=0),
     # "Dense Medium": dict(n_dense_layers=2, n_dense_units=300, n_lstm_layers=0),
-    "Dense Large": dict(n_dense_layers=4, n_dense_units=400, n_lstm_layers=0),
+    # "Dense Large": dict(n_dense_layers=4, n_dense_units=400, n_lstm_layers=0),
 
     # "LSTM Small": dict(n_lstm_layers=2, n_lstm_units=25, n_dense_layers=0,),
-    # "LSTM Medium": dict(n_lstm_layers=2, n_lstm_units=85, n_dense_layers=0,),
-    "LSTM Large": dict(n_lstm_layers=3, n_lstm_units=110, n_dense_layers=0,),
+    "LSTM Medium": dict(n_lstm_layers=2, n_lstm_units=85, n_dense_layers=0,),
+    # "LSTM Large": dict(n_lstm_layers=3, n_lstm_units=110, n_dense_layers=0,),
     
-    # "ConvDip Small": dict(n_lstm_layers=1, n_dense_layers=1, n_dense_units=70, model_type='convdip'),
+    "ConvDip Small": dict(n_lstm_layers=1, n_dense_layers=1, n_dense_units=70, model_type='convdip'),
     # "ConvDip Medium": dict(n_lstm_layers=2, n_dense_layers=3, n_dense_units=250, model_type='convdip'),
-    # "ConvDip Large": dict(n_lstm_layers=2, n_dense_layers=4, n_dense_units=400, model_type='convdip'),
+    "ConvDip Large": dict(n_lstm_layers=2, n_dense_layers=4, n_dense_units=400, model_type='convdip'),
 
 }
 
@@ -75,7 +72,6 @@ fwd_free = forward.create_forward_model(info=info, fixed_ori=False)
 
 # Load Data Set
 pth = r'simulations/sim_10200_1-1000points_noise.pkl'
-# pth = r'simulations/sim_10200_1-1000points.pkl'
 
 with open(pth, 'rb') as f:
     sim = pkl.load(f)
@@ -103,17 +99,17 @@ train_params = dict(epochs=epochs, patience=patience, loss=loss,
 ########################################################################
 # Specifications of the models
 model_params_dict = {
-    # "Dense Small": dict(n_dense_layers=2, n_dense_units=70, n_lstm_layers=0),
+    "Dense Small": dict(n_dense_layers=2, n_dense_units=70, n_lstm_layers=0),
     # "Dense Medium": dict(n_dense_layers=2, n_dense_units=300, n_lstm_layers=0),
-    "Dense Large": dict(n_dense_layers=4, n_dense_units=400, n_lstm_layers=0),
+    # "Dense Large": dict(n_dense_layers=4, n_dense_units=400, n_lstm_layers=0),
 
-    # "LSTM Small": dict(n_lstm_layers=2, n_lstm_units=25, n_dense_layers=0,),
+    "LSTM Small": dict(n_lstm_layers=2, n_lstm_units=25, n_dense_layers=0,),
     # "LSTM Medium": dict(n_lstm_layers=2, n_lstm_units=85, n_dense_layers=0,),
-    "LSTM Large": dict(n_lstm_layers=3, n_lstm_units=110, n_dense_layers=0,),
+    # "LSTM Large": dict(n_lstm_layers=3, n_lstm_units=110, n_dense_layers=0,),
     
-    # "ConvDip Small": dict(n_lstm_layers=1, n_dense_layers=1, n_dense_units=70, model_type='convdip'),
+    "ConvDip Small": dict(n_lstm_layers=1, n_dense_layers=1, n_dense_units=70, model_type='convdip'),
     # "ConvDip Medium": dict(n_lstm_layers=2, n_dense_layers=3, n_dense_units=250, model_type='convdip'),
-    # "ConvDip Large": dict(n_lstm_layers=2, n_dense_layers=4, n_dense_units=400, model_type='convdip'),
+    "ConvDip Large": dict(n_lstm_layers=2, n_dense_layers=4, n_dense_units=400, model_type='convdip'),
 
 }
 
@@ -123,3 +119,4 @@ for model_name, model_params in model_params_dict.items():
     net.model.compile(optimizer='adam', loss='mean_squared_error')
     net.save(r'models', name=f'{model_name}_1-1000points_noise-cosine-mse')
     del net
+print("Program finished")

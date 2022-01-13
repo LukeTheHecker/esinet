@@ -28,6 +28,10 @@ from . import evaluate
 from . import losses
 from .custom_layers import BahdanauAttention, Attention
 
+# Fix from: https://github.com/tensorflow/tensorflow/issues/35100
+devices = tf.config.experimental.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(devices[0], True)
+
 class Net:
     ''' The neural network class that creates and trains the model. 
     
@@ -248,6 +252,9 @@ class Net:
         gen = self.generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size)
         steps_per_epoch = stop_idx // batch_size
         validation_data = (pad_sequences(x_scaled[stop_idx:], dtype='float32'), pad_sequences(y_scaled[stop_idx:], dtype='float32'))
+
+        
+        
         if device is None:
             # history = self.model.fit(x_scaled, y_scaled, 
             #     epochs=epochs, batch_size=batch_size, shuffle=True, 
@@ -279,7 +286,7 @@ class Net:
             return self
     @staticmethod
     def generate_batches(x, y, batch_size):
-
+            print('start generator')
             n_batches = int(len(x) / batch_size)
             x = x[:int(n_batches*batch_size)]
             y = y[:int(n_batches*batch_size)]
