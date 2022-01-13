@@ -100,7 +100,8 @@ def eval_mean_localization_error(y_true, y_est, pos, k_neighbors=5,
         The mean localization error between all sources in y_true and the 
         closest matches in y_est.
     '''
-
+    if y_est.sum() == 0 or y_true.sum() == 0:
+        return np.nan
     y_true = deepcopy(y_true)
     y_est = deepcopy(y_est)
 
@@ -259,7 +260,8 @@ def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.25, plot_me=False):
     '''
     # Copy
     # t_start = time.time()
-
+    if y_est.sum() == 0 or y_true.sum() == 0:
+        return np.nan, np.nan
     y_true = deepcopy(y_true)
     y_est = deepcopy(y_est)
     # Absolute values
