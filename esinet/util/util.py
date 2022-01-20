@@ -427,24 +427,16 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0,
             data_cov = mne.cov.regularize(data_cov, epochs.info, 
                 rank=rank, verbose=verbose)
 
-        # try:
+
 
         
         lcmv_filter = mne.beamformer.make_lcmv(epochs.info, fwd, data_cov, reg=reg, 
             weight_norm=weight_norm, noise_cov=noise_cov, verbose=verbose, pick_ori=pick_ori, 
             rank=rank, reduce_rank=reduce_rank, inversion=inversion)
-        # except:
-        #     print("reduce rank then..")
-        #     lcmv_filter = mne.beamformer.make_lcmv(evoked.info, fwd, data_cov, reg=reg, 
-        #         weight_norm=weight_norm, noise_cov=noise_cov, verbose=verbose, pick_ori=pick_ori, 
-        #         rank=rank, reduce_rank=reduce_rank, inversion=inversion)
+
         stc = mne.beamformer.apply_lcmv(evoked.crop(tmin=0.), lcmv_filter, 
             max_ori_out='signed', verbose=verbose)
-        # if not all([v is None for v in baseline]):
-        #     print("division")
-        #     stc_base = mne.beamformer.apply_lcmv(evoked.crop(tmax=0.), lcmv_filter, verbose=verbose)
-            
-        #     stc = stc / stc_base.mean()
+
         
     else:
         # noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
@@ -495,9 +487,8 @@ def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, parallel=True,
                     pick_ori=pick_ori, reg=reg, regularize=regularize)
             except:
                 print(f'{method} didnt work, returning zeros')
-                if i>0:
-                    stc = deepcopy(stcs[0])
-                    stc.data = np.zeros((stc.data.shape[0], len(eeg[i].times)))
+                stc = deepcopy(stcs[0])
+                stc.data = np.zeros((stc.data.shape[0], len(eeg[i].crop(tmin=0.).times)))
                 
                     
             stcs.append(stc)
