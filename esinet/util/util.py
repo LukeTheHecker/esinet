@@ -9,6 +9,8 @@ import logging
 from time import time
 from scipy.stats import pearsonr
 from tqdm.notebook import tqdm
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from .. import simulation
 from .. import net
 
@@ -659,3 +661,20 @@ def add_noise_baseline(eeg, src, fwd, num=50, verbose=0):
     # new_eeg.set_eeg_reference('average', projection=True, verbose=verbose)
 
     return new_eeg
+
+
+
+def multipage(filename, figs=None, dpi=300, png=False):
+    ''' Saves all open (or list of) figures to filename.pdf with dpi''' 
+    pp = PdfPages(filename)
+    path = os.path.dirname(filename)
+    fn = os.path.basename(filename)[:-4]
+
+    if figs is None:
+        figs = [plt.figure(n) for n in plt.get_fignums()]
+    for i, fig in enumerate(figs):
+        print(f'saving fig {fig}\n')
+        fig.savefig(pp, format='pdf', dpi=dpi)
+        if png:
+            fig.savefig(f'{path}\\{i}_{fn}.png', dpi=600)
+    pp.close()

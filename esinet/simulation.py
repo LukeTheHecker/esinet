@@ -734,7 +734,6 @@ class Simulation:
     def crop(self, tmin=None, tmax=None, include_tmax=False, verbose=0):
         eeg_data = []
         source_data = []
-        print("sup")
         if tmax is None:
             tmax = self.eeg_data[0].tmax
         for i in range(self.n_samples):
