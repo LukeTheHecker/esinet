@@ -760,3 +760,15 @@ class Simulation:
         return self
 
 
+    def select(self, samples):
+        ''' Select subset of samples.
+        Parameters
+        ----------
+        samples : int/list/tuple
+            If type int select the given number of samples, if type list select indices given by list
+        Return
+        ------
+
+        '''
+        print("not implemented yet")
+        return self

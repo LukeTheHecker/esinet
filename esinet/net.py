@@ -66,7 +66,7 @@ class Net:
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
         n_dense_units=100, n_lstm_units=75, activation_function='relu', 
         n_filters=8, kernel_size=(3,3), n_jobs=-1, model_type='auto', 
-        scale_individually=False, verbose=True):
+        scale_individually=True, verbose=True):
 
         self._embed_fwd(fwd)
         
