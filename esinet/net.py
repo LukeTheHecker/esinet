@@ -30,7 +30,8 @@ from .custom_layers import BahdanauAttention, Attention
 
 # Fix from: https://github.com/tensorflow/tensorflow/issues/35100
 devices = tf.config.experimental.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(devices[0], True)
+if len(devices) > 0:
+    tf.config.experimental.set_memory_growth(devices, True)
 
 class Net:
     ''' The neural network class that creates and trains the model. 
@@ -231,11 +232,11 @@ class Net:
         
         
         if self.model_type.lower() == 'convdip':
-            print("interpolating for convdip...")
+            # print("interpolating for convdip...")
             elec_pos = _find_topomap_coords(self.info, self.info.ch_names)
             interpolator = self.make_interpolator(elec_pos, res=self.interp_channel_shape[0])
             x_scaled_interp = deepcopy(x_scaled)
-            for i, sample in tqdm(enumerate(x_scaled)):
+            for i, sample in enumerate(x_scaled):
                 list_of_time_slices = []
                 for time_slice in sample:
                     time_slice_interp = interpolator.set_values(time_slice)()[::-1]
