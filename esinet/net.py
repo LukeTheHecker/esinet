@@ -29,9 +29,10 @@ from . import losses
 from .custom_layers import BahdanauAttention, Attention
 
 # Fix from: https://github.com/tensorflow/tensorflow/issues/35100
-devices = tf.config.experimental.list_physical_devices('GPU')
-if len(devices) > 0:
-    tf.config.experimental.set_memory_growth(devices, True)
+# devices = tf.config.experimental.list_physical_devices('GPU')
+# if len(devices) > 0:
+#     print(devices)
+#     tf.config.experimental.set_memory_growth(devices, True)
 
 class Net:
     ''' The neural network class that creates and trains the model. 
