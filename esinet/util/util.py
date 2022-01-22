@@ -112,10 +112,14 @@ def eeg_to_Epochs(data, pth_fwd, info=None, parallel=False):
     # else:
     if parallel:
         epochs = Parallel(n_jobs=-1, backend='loky')(delayed(mne.EpochsArray)(d[np.newaxis, :, :], info, verbose=0) for d in data)  
-        epochs = Parallel(n_jobs=-1, backend='loky')(delayed(epoch.set_eeg_reference)('average', projection=True, verbose=0) for epoch in epochs)
+        if 'eeg' in set(epochs[0].get_channel_types()):
+            epochs = Parallel(n_jobs=-1, backend='loky')(delayed(epoch.set_eeg_reference)('average', projection=True, verbose=0) for epoch in epochs)
     else:
-        epochs = [mne.EpochsArray(d[np.newaxis, :, :], info, verbose=0).set_eeg_reference('average', projection=True, verbose=0) for d in data]
+        epochs = [mne.EpochsArray(d[np.newaxis, :, :], info, verbose=0) for d in data]
     
+        if 'eeg' in set(epochs[0].get_channel_types()):
+            epochs = [epoch.set_eeg_reference('average', projection=True, verbose=0) for epoch in epochs]
+            
     
     
     return epochs
@@ -386,9 +390,13 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0,
     reg=0.05, regularize=False,verbose=0):
     ''' Quickly compute inverse solution using MNE methods
     '''
-
-    epochs.set_eeg_reference(projection=True, verbose=verbose)#.apply_baseline(baseline=baseline)
-    evoked = epochs.average()
+    if isinstance(epochs, (mne.Epochs, mne.EpochsArray)):
+        evoked = epochs.average()
+    elif isinstance(epochs, (mne.Evoked, mne.EvokedArray)):
+        evoked = epochs
+    if 'eeg' in set(evoked.get_channel_types()):
+        evoked.set_eeg_reference(projection=True, verbose=verbose)
+    
     raw = mne.io.RawArray(evoked.data, evoked.info, verbose=verbose)
     if rank is None:
         rank = mne.compute_rank(epochs, tol=1e-6, tol_kind='relative', verbose=verbose)
@@ -396,9 +404,11 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0,
 
     if not all([v is None for v in baseline]):
         # print("calcing a good noise covariance", baseline)
-        noise_cov = mne.compute_raw_covariance(
-            raw, tmax=abs(baseline[0]), tmin=0.0, rank=rank, method=estimator,
-            verbose=verbose)
+        # noise_cov = mne.compute_raw_covariance(
+        #     raw, tmin=abs(baseline[0]), tmax=0.0, rank=rank, method=estimator,
+        #     verbose=verbose)
+        noise_cov = mne.compute_covariance(epochs, tmin=baseline[0], 
+            tmax=baseline[1], method=estimator)
         
         
         # noise_cov = mne.compute_covariance(epochs, method='empirical', 
@@ -417,7 +427,7 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0,
             tmin = 0
         else:
             tmin = abs(baseline[0])
-        print(raw, tmin, rank, estimator)
+        # print(raw, tmin, rank, estimator)
         try:
             data_cov = mne.compute_raw_covariance(raw, tmin=tmin, 
                 tmax=None, rank=rank, method=estimator, verbose=verbose)
@@ -441,7 +451,8 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0,
 
         
     else:
-        # noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
+        if noise_cov is None:
+            noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1), verbose=verbose)
         # noise_cov = mne.cov.regularize(noise_cov, raw.info, verbose=verbose)
         lambda2 = 1. / snr ** 2
         inverse_operator = mne.minimum_norm.make_inverse_operator(
@@ -459,7 +470,7 @@ def wrap_mne_inverse(fwd, sim, method='eLORETA', snr=3.0, parallel=True,
     ''' Wrapper that calculates inverse solutions to a bunch of simulated
         samples of a esinet.Simulation object
     '''
-    eeg, sources = net.Net._handle_data_input((sim,))
+    eeg, sources = net.Net._handle_data_input((deepcopy(sim),))
     if add_baseline:
         eeg = [add_noise_baseline(e, src, fwd, num=n_baseline, verbose=0) for e, src in zip(eeg, sources)]
         baseline = (eeg[0].tmin, 0)
