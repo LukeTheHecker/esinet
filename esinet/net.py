@@ -28,6 +28,12 @@ from . import evaluate
 from . import losses
 from .custom_layers import BahdanauAttention, Attention
 
+# Fix from: https://github.com/tensorflow/tensorflow/issues/35100
+# devices = tf.config.experimental.list_physical_devices('GPU')
+# if len(devices) > 0:
+#     print(devices)
+#     tf.config.experimental.set_memory_growth(devices, True)
+
 class Net:
     ''' The neural network class that creates and trains the model. 
     
@@ -62,7 +68,7 @@ class Net:
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
         n_dense_units=100, n_lstm_units=75, activation_function='relu', 
         n_filters=8, kernel_size=(3,3), n_jobs=-1, model_type='auto', 
-        verbose=True):
+        scale_individually=True, verbose=True):
 
         self._embed_fwd(fwd)
         
@@ -79,6 +85,7 @@ class Net:
         self.n_jobs = n_jobs
         self.model_type = model_type
         self.compiled = False
+        self.scale_individually = scale_individually
         self.verbose = verbose
 
     def _embed_fwd(self, fwd):
@@ -226,11 +233,11 @@ class Net:
         
         
         if self.model_type.lower() == 'convdip':
-            print("interpolating for convdip...")
+            # print("interpolating for convdip...")
             elec_pos = _find_topomap_coords(self.info, self.info.ch_names)
             interpolator = self.make_interpolator(elec_pos, res=self.interp_channel_shape[0])
             x_scaled_interp = deepcopy(x_scaled)
-            for i, sample in tqdm(enumerate(x_scaled)):
+            for i, sample in enumerate(x_scaled):
                 list_of_time_slices = []
                 for time_slice in sample:
                     time_slice_interp = interpolator.set_values(time_slice)()[::-1]
@@ -248,6 +255,9 @@ class Net:
         gen = self.generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size)
         steps_per_epoch = stop_idx // batch_size
         validation_data = (pad_sequences(x_scaled[stop_idx:], dtype='float32'), pad_sequences(y_scaled[stop_idx:], dtype='float32'))
+
+        
+        
         if device is None:
             # history = self.model.fit(x_scaled, y_scaled, 
             #     epochs=epochs, batch_size=batch_size, shuffle=True, 
@@ -279,7 +289,7 @@ class Net:
             return self
     @staticmethod
     def generate_batches(x, y, batch_size):
-
+            print('start generator')
             n_batches = int(len(x) / batch_size)
             x = x[:int(n_batches*batch_size)]
             y = y[:int(n_batches*batch_size)]
@@ -430,27 +440,20 @@ class Net:
             Scaled EEG
         '''
         eeg_out = deepcopy(eeg)
-        # Common average ref & unit variance
-        # for sample in range(eeg.shape[0]):
-        #     for time in range(eeg.shape[2]):
-        #         eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
-        #         eeg_out[sample, :, time] /= eeg_out[sample, :, time].std()
         
-        # Common average ref & min-max scaling
-        # lower, upper = [np.percentile(eeg, 25), np.percentile(eeg, 75)]
-        # lower, upper = [np.min(eeg), np.max(eeg)]
-        
-        # eeg_out = (eeg_out-lower) / (upper-lower)
-        # for sample in range(eeg.shape[0]):
-        #     for time in range(eeg.shape[2]):
-        #         eeg_out[sample, :, time] -= np.mean(eeg_out[sample, :, time])
-        
-
-        for sample, eeg_sample in enumerate(eeg):
-            eeg_out[sample] = self.robust_minmax_scaler(eeg_sample)
-            # Common average ref:
-            for time in range(eeg_sample.shape[-1]):
-                eeg_out[sample][:, time] -= np.mean(eeg_sample[:, time])
+        if self.scale_individually:
+            for sample, eeg_sample in enumerate(eeg):
+                # Common average ref:
+                for time in range(eeg_sample.shape[-1]):
+                    eeg_out[sample][:, time] -= np.mean(eeg_sample[:, time])
+                    eeg_out[sample][:, time] /= np.max(np.abs(eeg_sample[:, time]))
+                    
+        else:
+            for sample, eeg_sample in enumerate(eeg):
+                eeg_out[sample] = self.robust_minmax_scaler(eeg_sample)
+                # Common average ref:
+                for time in range(eeg_sample.shape[-1]):
+                    eeg_out[sample][:, time] -= np.mean(eeg_sample[:, time])
         return eeg_out
     
 

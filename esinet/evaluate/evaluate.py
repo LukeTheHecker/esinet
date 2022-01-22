@@ -234,7 +234,8 @@ def eval_nmse(y_true, y_est):
     y_est_normed = y_est / np.max(np.abs(y_est))
     return np.mean((y_true_normed-y_est_normed)**2)
 
-def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.25, plot_me=False):
+def eval_auc(y_true, y_est, pos, n_redraw=25, epsilon=0.25, 
+    plot_me=False):
     ''' Returns the area under the curve metric between true and predicted
     source. 
 

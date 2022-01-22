@@ -730,6 +730,7 @@ class Simulation:
         self.eeg_data = epochs
         self.source_data = sources
         self.simulation_info = df
+        
     def crop(self, tmin=None, tmax=None, include_tmax=False, verbose=0):
         eeg_data = []
         source_data = []
@@ -739,13 +740,13 @@ class Simulation:
             # print(self.eeg_data[i].tmax, tmax)
             cropped_source = self.source_data[i].crop(tmin=tmin, tmax=tmax, include_tmax=include_tmax)
             cropped_eeg = self.eeg_data[i].crop(tmin=tmin, tmax=tmax, include_tmax=include_tmax, verbose=verbose)
-            min_crop = (1/cropped_source.sfreq)
-            while len(cropped_source.times) > len(cropped_eeg.times):
+            # min_crop = (1/cropped_source.sfreq)
+            # while len(cropped_source.times) > len(cropped_eeg.times):
 
-                # print(f"cropping: {len(cropped_source.times)}")
-                tmax -= min_crop
-                cropped_source = cropped_source.crop(tmin=tmin, tmax=tmax-min_crop)
-                # print(f"cropped: {len(cropped_source.times)}")
+            #     # print(f"cropping: {len(cropped_source.times)}")
+            #     tmax -= min_crop
+            #     cropped_source = cropped_source.crop(tmin=tmin, tmax=tmax-min_crop)
+            #     # print(f"cropped: {len(cropped_source.times)}")
 
 
             source_data.append( cropped_source )
@@ -758,3 +759,15 @@ class Simulation:
         return self
 
 
+    def select(self, samples):
+        ''' Select subset of samples.
+        Parameters
+        ----------
+        samples : int/list/tuple
+            If type int select the given number of samples, if type list select indices given by list
+        Return
+        ------
+
+        '''
+        print("not implemented yet")
+        return self
