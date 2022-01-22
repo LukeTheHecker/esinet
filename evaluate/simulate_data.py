@@ -24,7 +24,7 @@ fwd_free = forward.create_forward_model(info=info, fixed_ori=False)
 # Create Data set
 n_samples = 10000
 duration_of_trial = (0.01, 2)
-method = 'noise'
+method = 'standard'
 exponent = 3
 
 settings = dict(duration_of_trial=duration_of_trial, method=method)
@@ -40,6 +40,6 @@ sim = sim_short + sim_long
 del sim_short, sim_long
 sim.shuffle()
 
-sim.save(f'simulations/sim_{sim.n_samples}_1-1000points_noise.pkl')
+sim.save(f'simulations/sim_{sim.n_samples}_1-1000points_standard.pkl')
 
 ########################################################################
