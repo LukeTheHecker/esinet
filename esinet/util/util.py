@@ -403,17 +403,15 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0,
     estimator = 'empirical'
 
     if not all([v is None for v in baseline]):
-        # print("calcing a good noise covariance", baseline)
-        # noise_cov = mne.compute_raw_covariance(
-        #     raw, tmin=abs(baseline[0]), tmax=0.0, rank=rank, method=estimator,
-        #     verbose=verbose)
-        noise_cov = mne.compute_covariance(epochs, tmin=baseline[0], 
-            tmax=baseline[1], method=estimator)
+        print("calcing a good noise covariance", baseline)
         
-        
-        # noise_cov = mne.compute_covariance(epochs, method='empirical', 
-        #     tmin=baseline[0], tmax=baseline[1], verbose=verbose, rank='full')
-
+        try:
+            noise_cov = mne.compute_covariance(epochs, tmin=baseline[0], 
+                tmax=baseline[1], method=estimator, rank=rank, verbose=verbose)
+        except:
+            noise_cov = mne.compute_raw_covariance(
+                raw, tmin=abs(baseline[0]), tmax=baseline[1], rank=rank, method=estimator,
+                verbose=verbose)
     else:
         # noise_cov = mne.make_ad_hoc_cov(evoked.info, std=dict(eeg=1),
         #     verbose=verbose)
@@ -429,12 +427,14 @@ def mne_inverse(fwd, epochs, method='eLORETA', snr=3.0,
             tmin = abs(baseline[0])
         # print(raw, tmin, rank, estimator)
         try:
-            data_cov = mne.compute_raw_covariance(raw, tmin=tmin, 
-                tmax=None, rank=rank, method=estimator, verbose=verbose)
+            data_cov = mne.compute_covariance(epochs, tmin=baseline[1], 
+                tmax=None, method=estimator, verbose=verbose)
+
         except:
-            data_cov = mne.compute_covariance(epochs, tmin=0.0, 
+            data_cov = mne.compute_raw_covariance(raw, tmin=baseline[1], 
                 tmax=None, rank=rank, method=estimator, verbose=verbose)
         
+ 
         if regularize:
             data_cov = mne.cov.regularize(data_cov, epochs.info, 
                 rank=rank, verbose=verbose)
