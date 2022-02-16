@@ -19,8 +19,6 @@ with open(pth, 'rb') as f:
     sim = pkl.load(f)
 
 
-
-
 ########################################################################
 epochs = 150
 patience = 2
@@ -42,18 +40,18 @@ train_params = dict(epochs=epochs, patience=patience, loss=loss,
 ########################################################################
 # Specifications of the models
 model_params_dict = {
-    "Dense Medium": dict(n_dense_layers=2, n_dense_units=300, n_lstm_layers=0),
-    "LSTM Medium": dict(n_lstm_layers=2, n_lstm_units=85, n_dense_layers=0),
-    "ConvDip Medium": dict(n_lstm_layers=2, n_dense_layers=3, n_dense_units=250, model_type='convdip'),
+    # "Dense Medium": dict(n_dense_layers=2, n_dense_units=300, n_lstm_layers=0),
+    "LSTM Medium": dict(n_lstm_layers=2, n_lstm_units=85, n_dense_layers=0, final_lstm_layer=True),
+    # "ConvDip Medium": dict(n_lstm_layers=2, n_dense_layers=3, n_dense_units=250, model_type='convdip'),
     
-    "Dense Small": dict(n_dense_layers=2, n_dense_units=70, n_lstm_layers=0),
-    "Dense Large": dict(n_dense_layers=4, n_dense_units=400, n_lstm_layers=0),
+    # "Dense Small": dict(n_dense_layers=2, n_dense_units=70, n_lstm_layers=0),
+    # "Dense Large": dict(n_dense_layers=4, n_dense_units=400, n_lstm_layers=0),
 
-    "LSTM Small": dict(n_lstm_layers=2, n_lstm_units=25, n_dense_layers=0),
-    "LSTM Large": dict(n_lstm_layers=3, n_lstm_units=110, n_dense_layers=0),
+    # "LSTM Small": dict(n_lstm_layers=2, n_lstm_units=25, n_dense_layers=0),
+    # "LSTM Large": dict(n_lstm_layers=3, n_lstm_units=110, n_dense_layers=0),
     
-    "ConvDip Small": dict(n_lstm_layers=1, n_dense_layers=1, n_dense_units=70, model_type='convdip'),
-    "ConvDip Large": dict(n_lstm_layers=2, n_dense_layers=4, n_dense_units=400, model_type='convdip'),
+    # "ConvDip Small": dict(n_lstm_layers=1, n_dense_layers=1, n_dense_units=70, model_type='convdip'),
+    # "ConvDip Large": dict(n_lstm_layers=2, n_dense_layers=4, n_dense_units=400, model_type='convdip'),
 }
 
 for model_name, model_params in model_params_dict.items():
@@ -62,6 +60,5 @@ for model_name, model_params in model_params_dict.items():
     net = Net(fwd, **model_params)
     net.fit(sim, **train_params)
     net.model.compile(optimizer='adam', loss='mean_squared_error')
-    net.save(r'models', name=f'{model_name}_1-1000points_standard-cosine')
+    net.save(r'models', name=f'{model_name}_1-1000points_standard-cosine_final-lstm-layer')
     del net
-

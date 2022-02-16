@@ -29,7 +29,7 @@ batch_size = 8
 validation_split = 0.05
 validation_freq = 2 
 optimizer = tf.keras.optimizers.Adam() 
-device = '/GPU:0'
+device = None #'/GPU:0'
 
 train_params = dict(epochs=epochs, patience=patience, loss=loss, 
     optimizer=optimizer, return_history=True, 
@@ -46,7 +46,7 @@ model_params_dict = {
     # "Dense Large": dict(n_dense_layers=4, n_dense_units=400, n_lstm_layers=0),
 
     # "LSTM Small": dict(n_lstm_layers=2, n_lstm_units=25, n_dense_layers=0,),
-    "LSTM Medium": dict(n_lstm_layers=2, n_lstm_units=85, n_dense_layers=0,),
+    "LSTM Medium": dict(n_lstm_layers=2, n_lstm_units=85, n_dense_layers=0, final_lstm_layer=True),
     # "LSTM Large": dict(n_lstm_layers=3, n_lstm_units=110, n_dense_layers=0,),
     
     # "ConvDip Small": dict(n_lstm_layers=1, n_dense_layers=1, n_dense_units=70, model_type='convdip'),
@@ -59,5 +59,5 @@ for model_name, model_params in model_params_dict.items():
     net = Net(fwd, **model_params)
     net.fit(sim, **train_params)
     net.model.compile(optimizer='adam', loss='mean_squared_error')
-    net.save(r'models', name=f'{model_name}_1-1000points_standard-cosine-mse')
+    net.save(r'models', name=f'{model_name}_1-1000points_standard-cosine')
     del net
