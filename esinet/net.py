@@ -788,18 +788,18 @@ class Net:
 
         if self.verbose:
             self.model.summary()
-        
+    
     def _build_temporal_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
         if self.n_lstm_layers>0 and self.n_dense_layers>0:
             name = "Mixed-model"
-        elif self.n_lstm_layers>0 and self.n_dense_layers==0:
+        elif self.n_lstm_layers>0:
             name = "LSTM-model"
         else:
             name = "Dense-model"
         
-        self.model = keras.Sequential(name='LSTM_v2')
+        self.model = keras.Sequential(name=name)
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (None, self.n_channels)
         self.model.add(InputLayer(input_shape=input_shape, name='Input'))
@@ -839,72 +839,61 @@ class Net:
             Dense(self.n_dipoles, activation='linear'), name='FC_Out')
         )
 
+
         self.model.build(input_shape=input_shape)
 
-    def _build_fast_temporal_model(self):
-        ''' Build the temporal artificial neural network model using LSTM layers.
-        '''
-        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        # Input Handling
-        self.n_dense_layers = 2
-        if not isinstance(self.n_dense_units, (tuple, list)):
-            self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
-        if self.rnn_type.lower() == 'lstm':
-            RNN = LSTM
-        elif self.rnn_type.lower() == 'gru':
-            RNN = GRU
-            print("IM A GRUUUUUUUU")
-        elif self.rnn_type.lower() == 'rnn':
-            RNN = SimpleRNN
-        # if not isinstance(self.dropout, (tuple, list)):
-        #     dropout = [self.dropout]*self.n_dense_layers
-        # else:
-        #     dropout = self.dropout
-
+    # def _build_temporal_model(self):
+    #     ''' Build the temporal artificial neural network model using LSTM layers.
+    #     '''
+    #     if self.n_lstm_layers>0 and self.n_dense_layers>0:
+    #         name = "Mixed-model"
+    #     elif self.n_lstm_layers>0 and self.n_dense_layers==0:
+    #         name = "LSTM-model"
+    #     else:
+    #         name = "Dense-model"
         
-        #  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        # Model Building
-        inputs = tf.keras.Input(shape=(None, self.n_channels), name='Input')
-
-
-        # FC1
-        fc1 = TimeDistributed(Dense(self.n_dense_units[0], 
-            activation=self.activation_function), 
-            name='FC1')(inputs)
-        fc1 = Dropout(self.dropout, name='Dropout1')(fc1)
-
-        # LSTM path
-        # LSTM layers
-        lstm1 = Bidirectional(RNN(self.n_lstm_units, return_sequences=True,
-            dropout=self.dropout), name=f'LSTM_1')(inputs)
-
-        # concatenate
-        concat = concatenate([lstm1, fc1], name='Concat')
-
-
-        # FC2
-        fc2 = TimeDistributed(Dense(self.n_dense_units[1],
-            activation=self.activation_function), 
-            name='FC2')(concat)
-        fc2 = Dropout(self.dropout, name='Dropout2')(fc2)
-
-
-        # # LSTM path
-        # # LSTM layers
-        # lstm2 = Bidirectional(RNN(self.n_lstm_units, return_sequences=True,
-        #     dropout=self.dropout), name=f'LSTM_2')(fc2)
+    #     self.model = keras.Sequential(name='LSTM_v2')
+    #     tf.keras.backend.set_image_data_format('channels_last')
+    #     input_shape = (None, self.n_channels)
+    #     self.model.add(InputLayer(input_shape=input_shape, name='Input'))
         
-        # concat = concatenate([lstm2, fc2], name='Concat_2')
+    #     # LSTM layers
+    #     if not isinstance(self.n_lstm_units, (tuple, list)):
+    #         self.n_lstm_units = [self.n_lstm_units] * self.n_lstm_layers
+        
+    #     if not isinstance(self.dropout, (tuple, list)):
+    #         dropout = [self.dropout]*self.n_lstm_layers
+    #     else:
+    #         dropout = self.dropout
+        
+    #     for i in range(self.n_lstm_layers):
+    #         self.model.add(Bidirectional(LSTM(self.n_lstm_units[i], 
+    #             return_sequences=True, input_shape=input_shape),
+    #             name=f'RNN_{i}'))
+    #         self.model.add(Dropout(dropout[i], name=f'Dropout_{i}'))
 
+    #     # Hidden Dense layer(s):
+    #     if not isinstance(self.n_dense_units, (tuple, list)):
+    #         self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
+        
+    #     if not isinstance(self.dropout, (tuple, list)):
+    #         dropout = [self.dropout]*self.n_dense_layers
+    #     else:
+    #         dropout = self.dropout
+        
 
+    #     for i in range(self.n_dense_layers):
+    #         self.model.add(TimeDistributed(Dense(self.n_dense_units[i], 
+    #             activation=self.activation_function), name=f'FC_{i}'))
+    #         self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
 
+    #     # Final For-each layer:
+    #     self.model.add(TimeDistributed(
+    #         Dense(self.n_dipoles, activation='linear'), name='FC_Out')
+    #     )
 
-        output = TimeDistributed(Dense(self.n_dipoles,
-            activation='linear'), 
-            name='output')(fc2)
+    #     self.model.build(input_shape=input_shape)
 
-        self.model = tf.keras.Model(inputs=inputs, outputs=output, 
-            name='context_net')
 
     def _build_temporal_model_v3(self):
         ''' A mixed dense / LSTM network, inspired by:

@@ -179,3 +179,69 @@ def custom_loss(leadfield, fwd_scaler):
                                     dtype=tf.float32)
         return K.mean(tf.stack(batched_losses))  
     return loss_batch
+
+def cdist(A, B):
+    """
+    Computes the pairwise Euclidean distance matrix between two tensorflow matrices A & B, similiar to scikit-learn cdist.
+    For example:
+    A = [[1, 2],
+         [3, 4]]
+    B = [[1, 2],
+         [3, 4]]
+    should return:
+        [[0, 2.82],
+         [2.82, 0]]
+    :param A: m_a x n matrix
+    :param B: m_b x n matrix
+    :return: euclidean distance matrix (m_a x m_b)
+    """
+    # squared norms of each row in A and B
+    na = K.sum(K.square(A), axis=1)
+    nb = K.sum(K.square(B), axis=1)
+
+    # na as a row and nb as a column vectors
+    na = tf.expand_dims(na, axis=1)
+    nb = tf.expand_dims(nb, axis=0)
+    
+    # return pairwise euclidead difference matrix
+    D = tf.sqrt(tf.maximum(na - 2 * tf.matmul(A, B, False, True) + nb, 0.0))
+    return D
+
+
+
+def weighted_hausdorff_distance(pos, alpha=4, thresh=0.1):
+    ''' https://github.com/N0vel/weighted-hausdorff-distance-tensorflow-keras-loss/blob/master/weighted_hausdorff_loss.py
+    from https://arxiv.org/pdf/2010.12876.pdf'''
+    max_dist = 300
+
+    def hausdorff_loss(y_true, y_pred):
+        def loss(y_true, y_pred):
+            y_true = y_true / K.clip(K.max(y_true), K.epsilon(), None)
+            y_pred = y_pred/ K.clip(K.max(y_pred), K.epsilon(), None)
+
+            eps = 1e-6
+            gt_points = K.squeeze(tf.gather(pos, tf.where(K.abs(y_true)>thresh*K.max(K.abs(y_true))) ), axis=1)
+            num_gt_points = tf.shape(gt_points)[0]
+
+            p = y_pred
+
+            p_replicated = tf.squeeze(K.repeat(tf.expand_dims(p, axis=-1), num_gt_points))
+
+            d_matrix = cdist(pos, gt_points)
+
+            num_est_pts = tf.reduce_sum(p)
+            term_1 = (1 / (num_est_pts + eps)) * K.sum(p * K.min(d_matrix, 1))
+
+            d_div_p = K.min((d_matrix + eps) / (p_replicated ** alpha + (eps / max_dist)), 0)
+            d_div_p = K.clip(d_div_p, 0, max_dist)
+            term_2 = K.mean(d_div_p, axis=0)
+
+            return term_1 + term_2
+
+        batched_losses = tf.map_fn(lambda x:
+                                   loss(x[0], x[1]),
+                                   (y_true, y_pred),
+                                   dtype=tf.float32)
+        return K.mean(tf.stack(batched_losses))
+
+    return hausdorff_loss
