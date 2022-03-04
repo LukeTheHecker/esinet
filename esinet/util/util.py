@@ -1,4 +1,5 @@
-import pickle as pkl
+# import pickle as pkl
+import dill as pkl
 import mne
 from mne.io.constants import FIFF
 import numpy as np

@@ -16,13 +16,13 @@ from . import util
 
 DEFAULT_SETTINGS = {
     'method': 'standard',
-    'number_of_sources': (1, 10),
-    'extents':  (5,40),
+    'number_of_sources': (1, 25),
+    'extents':  (1,40),
     'amplitudes': (1, 10),
     'shapes': 'both',
     'duration_of_trial': 1.0,
     'sample_frequency': 100,
-    'target_snr': (2, 20),
+    'target_snr': (1, 20),
     'beta': (0.5, 1.5),  # (0, 3),
     'exponent': 3
 }

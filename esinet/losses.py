@@ -39,7 +39,7 @@ def nmse_loss(reg=0.05):
         error = K.square(true - pred)
         
 
-        return K.mean(error) + K.mean(K.abs(pred))*reg
+        return K.mean(error) #+ K.mean(K.abs(pred))*reg
 
     return loss
 
