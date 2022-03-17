@@ -208,6 +208,37 @@ def cdist(A, B):
     return D
 
 
+# def weighted_hausdorff_distance(pos, alpha=4, thresh=0.1):
+#     ''' https://github.com/N0vel/weighted-hausdorff-distance-tensorflow-keras-loss/blob/master/weighted_hausdorff_loss.py
+#     from https://arxiv.org/pdf/2010.12876.pdf'''
+#     max_dist = 300
+
+#     def hausdorff_loss(y_true, y_pred):
+#         y_true = y_true / K.clip(K.max(y_true), K.epsilon(), None)
+#         y_pred = y_pred/ K.clip(K.max(y_pred), K.epsilon(), None)
+
+#         eps = 1e-6
+#         gt_points = K.squeeze(tf.gather(pos, tf.where(K.abs(y_true)>thresh*K.max(K.abs(y_true))) ), axis=1)
+#         num_gt_points = tf.shape(gt_points)[0]
+
+#         p = y_pred
+
+#         p_replicated = tf.squeeze(K.repeat(tf.expand_dims(p, axis=-1), num_gt_points))
+
+#         d_matrix = cdist(pos, gt_points)
+
+#         num_est_pts = tf.reduce_sum(p)
+#         term_1 = (1 / (num_est_pts + eps)) * K.sum(p * K.min(d_matrix, 1))
+
+#         d_div_p = K.min((d_matrix + eps) / (p_replicated ** alpha + (eps / max_dist)), 0)
+#         d_div_p = K.clip(d_div_p, 0, max_dist)
+#         term_2 = K.mean(d_div_p, axis=0)
+
+#         return term_1 + term_2
+
+#     return hausdorff_loss
+def tf_nanmean(x):
+    return tf.reduce_mean(tf.boolean_mask(K.flatten(x), tf.math.is_nan(K.flatten(x))))
 
 def weighted_hausdorff_distance(pos, alpha=4, thresh=0.1):
     ''' https://github.com/N0vel/weighted-hausdorff-distance-tensorflow-keras-loss/blob/master/weighted_hausdorff_loss.py
@@ -215,33 +246,48 @@ def weighted_hausdorff_distance(pos, alpha=4, thresh=0.1):
     max_dist = 300
 
     def hausdorff_loss(y_true, y_pred):
-        def loss(y_true, y_pred):
-            y_true = y_true / K.clip(K.max(y_true), K.epsilon(), None)
-            y_pred = y_pred/ K.clip(K.max(y_pred), K.epsilon(), None)
+        def loss_time(y_true_sample, y_pred_sample):
+            def loss(y_true_slice, y_pred_sclice):
+                y_true_slice = K.abs(y_true_slice)
+                y_pred_sclice = K.abs(y_pred_sclice)
 
-            eps = 1e-6
-            gt_points = K.squeeze(tf.gather(pos, tf.where(K.abs(y_true)>thresh*K.max(K.abs(y_true))) ), axis=1)
-            num_gt_points = tf.shape(gt_points)[0]
+                y_true_slice = y_true_slice / K.clip(K.max(K.abs(y_true_slice)), K.epsilon(), None)
+                y_pred_sclice = y_pred_sclice/ K.clip(K.max(K.abs(y_pred_sclice)), K.epsilon(), None)
 
-            p = y_pred
+                eps = 1e-6
+                gt_points = K.squeeze(tf.gather(pos, tf.where(K.abs(y_true_slice)>thresh*K.max(K.abs(y_true_slice))) ), axis=1)
+                num_gt_points = tf.shape(gt_points)[0]
 
-            p_replicated = tf.squeeze(K.repeat(tf.expand_dims(p, axis=-1), num_gt_points))
+                p = y_pred_sclice
 
-            d_matrix = cdist(pos, gt_points)
+                p_replicated = tf.squeeze(K.repeat(tf.expand_dims(p, axis=-1), num_gt_points))
 
-            num_est_pts = tf.reduce_sum(p)
-            term_1 = (1 / (num_est_pts + eps)) * K.sum(p * K.min(d_matrix, 1))
+                d_matrix = cdist(pos, gt_points)
 
-            d_div_p = K.min((d_matrix + eps) / (p_replicated ** alpha + (eps / max_dist)), 0)
-            d_div_p = K.clip(d_div_p, 0, max_dist)
-            term_2 = K.mean(d_div_p, axis=0)
+                num_est_pts = tf.reduce_sum(p)
+                term_1 = (1 / (num_est_pts + eps)) * K.sum(p * K.min(d_matrix, 1))
 
-            return term_1 + term_2
+                d_div_p = K.min((d_matrix + eps) / (p_replicated ** alpha + (eps / max_dist)), 0)
+                d_div_p = K.clip(d_div_p, 0, max_dist)
+                term_2 = K.mean(d_div_p, axis=0)
 
-        batched_losses = tf.map_fn(lambda x:
-                                   loss(x[0], x[1]),
+                result = K.switch(K.sum(K.abs(y_true_slice))>0, term_1+term_2, tf.convert_to_tensor(0.0, dtype=tf.float32))
+                return result
+
+            fun = lambda x: loss(x[0], x[1])
+            batched_losses_time = tf.map_fn(fun,
+                                (y_true_sample, y_pred_sample),
+                                   dtype=tf.float32)
+            return K.mean(tf.stack(batched_losses_time))
+
+        fun = lambda x: loss_time(x[0], x[1])
+        batched_losses = tf.map_fn(fun,
                                    (y_true, y_pred),
                                    dtype=tf.float32)
         return K.mean(tf.stack(batched_losses))
 
     return hausdorff_loss
+
+# for a, b in zip(y_true, y_pred):
+#     for a_slice, b_sclice in zip(a,b):
+#         fun(a_sclice, b_sclice)

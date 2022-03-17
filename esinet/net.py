@@ -318,6 +318,7 @@ class Net:
                 x_pad = [x_pad[i] for i in new_order]
                 y_pad = [y_pad[i] for i in new_order]
                 for x_padlet, y_padlet in zip(x_pad, y_pad):
+                    # print(x_padlet.shape, y_padlet.shape)
                     yield (x_padlet, y_padlet)
 
 
