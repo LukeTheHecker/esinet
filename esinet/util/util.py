@@ -208,16 +208,23 @@ def calc_snr_range(mne_obj, baseline_span=(-0.2, 0.0), data_span=(0.0, 0.5)):
         raise ValueError(msg)
     
     
-    data = np.squeeze(evoked.data)
-    baseline_range = range(*[np.argmin(np.abs(evoked.times-base)) for base in baseline_span])
-    data_range = range(*[np.argmin(np.abs(evoked.times-base)) for base in data_span])
+    # data = np.squeeze(evoked.data)
+    # baseline_range = range(*[np.argmin(np.abs(evoked.times-base)) for base in baseline_span])
+    # data_range = range(*[np.argmin(np.abs(evoked.times-base)) for base in data_span])
     
-    gfp = np.std(data, axis=0)
-    snr_lo = gfp[data_range].min() / gfp[baseline_range].max() 
-    snr_hi = gfp[data_range].max() / gfp[baseline_range].min()
+    # gfp = np.std(data, axis=0)
+    # snr_lo = gfp[data_range].min() / gfp[baseline_range].max() 
+    # snr_hi = gfp[data_range].max() / gfp[baseline_range].min()
 
-    snr_range = [snr_lo, snr_hi]
-    return snr_range
+    # snr = [snr_lo, snr_hi]
+
+    data_base = evoked.copy().crop(*baseline_span)._data
+    sd_base = data_base.std(axis=0).mean()
+    data_signal = evoked.copy().crop(*data_span)._data
+    sd_signal = data_signal.std(axis=0).max()
+    snr = sd_signal/sd_base
+
+    return snr
 
 def repeat_newcol(x, n):
     ''' Repeat a list/numpy.ndarray x in n columns.'''
@@ -289,7 +296,7 @@ def get_triangle_neighbors(tris_lr):
 def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), 
     data_span=(0, 0.5), n_samples=int(1e4), optimizer=None, learning_rate=0.001, 
     validation_split=0.1, n_epochs=100, metrics=None, device=None, delta=1, 
-    batch_size=128, loss=None, false_positive_penalty=2, parallel=False, 
+    batch_size=8, loss=None, false_positive_penalty=2, parallel=False, 
     verbose=False):
     ''' The all-in-one convenience function for esinet.
     
@@ -353,6 +360,9 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0),
     sim.simulate(n_samples=n_samples)
     # Train neural network
     neural_net = net.Net(fwd, verbose=verbose)
+    if int(verbose) > 0:
+        neural_net.summary()
+        
     neural_net.fit(sim, optimizer=optimizer, learning_rate=learning_rate, 
         validation_split=validation_split, epochs=n_epochs, metrics=metrics,
         device=device, delta=delta, batch_size=batch_size, loss=loss,

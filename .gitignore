@@ -17,6 +17,7 @@ logs
 notes
 env
 evaluate/figures
+evaluate
 keras-tuner
 build
 .pytest_cache

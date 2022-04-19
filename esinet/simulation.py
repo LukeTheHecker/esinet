@@ -358,6 +358,8 @@ class Simulation:
         # Document the sample
         d = dict(number_of_sources=number_of_sources, positions=self.pos[src_centers], extents=extents, amplitudes=amplitudes, shapes=shapes, target_snr=0, duration_of_trials=duration_of_trial)
         self.simulation_info = self.simulation_info.append(d, ignore_index=True)
+        # self.simulation_info = pd.concat([self.simulation_info, d])
+        
         return source
 
     def simulate_eeg(self):

@@ -142,7 +142,7 @@ class Net:
 
     def fit(self, *args, optimizer=None, learning_rate=0.001, 
         validation_split=0.1, epochs=50, metrics=None, device=None, 
-        false_positive_penalty=2, delta=1., batch_size=128, loss=None, 
+        false_positive_penalty=2, delta=1., batch_size=8, loss=None, 
         sample_weight=None, return_history=False, dropout=0.2, patience=7, 
         tensorboard=False, validation_freq=1):
         ''' Train the neural network using training data (eeg) and labels (sources).
@@ -216,7 +216,8 @@ class Net:
                 # momentum=0.35)
         if self.loss is None:
             # self.loss = self.default_loss(weight=false_positive_penalty, delta=delta)
-            self.loss = 'mean_squared_error'
+            # self.loss = 'mean_squared_error'
+            self.loss = tf.keras.losses.CosineSimilarity()
 
 
         elif type(loss) == list:
@@ -320,7 +321,7 @@ class Net:
                     yield (x_padlet, y_padlet)
 
 
-    def prep_data(self, args,  dropout=0.2):
+    def prep_data(self, args):
         ''' Train the neural network using training data (eeg) and labels (sources).
         
         Parameters
@@ -379,13 +380,11 @@ class Net:
         # Ensure that the forward model has the same 
         # channels as the eeg object
         self._check_model(eeg)
-        # print("prep fun: ", eeg, len(eeg), type(eeg))
 
         # Handle EEG input
         if (type(eeg) == list and isinstance(eeg[0], util.EPOCH_INSTANCES)) or isinstance(eeg, util.EPOCH_INSTANCES):
             eeg = [eeg[i].get_data() for i, _ in enumerate(eeg)]
         else:
-            
             eeg = [sample_eeg[0] for sample_eeg in eeg]
 
         for i, eeg_sample in enumerate(eeg):
@@ -408,8 +407,6 @@ class Net:
         assert type(eeg[0]) == np.ndarray, "eeg must be a list of numpy.ndarrays"
         
 
-        # Extract data
-        # Prepare data
         # Scale sources
         y_scaled = self.scale_source(sources)
         # Scale EEG
@@ -421,7 +418,6 @@ class Net:
         
         # if self.model_type.lower() == 'convdip':
         #     x_scaled = [interp(x) for x in x_scaled]
-
 
         return x_scaled, y_scaled
 
