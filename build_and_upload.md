@@ -2,7 +2,7 @@
 
 ## Update your package information
 1. Add changes to the changelog and 
-2. update the version number in setup.py so people can track the development of the package.
+2. update the version number in *setup.py* so people can track the development of the package.
 
 ## Activate your dev environment
 ```

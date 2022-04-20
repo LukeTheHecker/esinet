@@ -1,13 +1,19 @@
-# esinet: Electric source imaging using artificial neural networks (ANNs)
+# esinet: Electric Source Imaging using Artificial Neural Networks (ANNs)
 
-**esinet** let's you solve the EEG inverse problem using ANNs. It currently supports two main architectures:
-## Model 1
+**esinet** let's you solve the EEG inverse problem using ANNs with the
+mne-python framework. It currently supports three main architectures:
 
-A fully connected neural network which is trained on single time instances of M/EEG data. This model was described in our [paper](https://www.frontiersin.org/articles/10.3389/fnins.2021.569918/full).
 
-## Model 2
+## ConvDip
+A convolutional neural network as described in our [first paper](https://www.frontiersin.org/articles/10.3389/fnins.2021.569918/full).
 
-A temporal long-short-term memory (LSTM) model which is trained on sequences of EEG data. A similar model only with different output specifications has been presented in a work bei [Cui et al., 2019](https://ieeexplore.ieee.org/abstract/document/8766914?casa_token=AFbwwLcRySAAAAAA:Gx9_D5QajW1parwhStwtxPdLVVIT8WTbdzTg8bSZ1LT6mTuOTxYyLxd84Kc3k9n2fpqkL8Dl).
+
+## Fully-connected network
+
+A fully-connected neural network which is trained on single time instances of M/EEG data. This model was described in our [second paper](https://www.biorxiv.org/content/10.1101/2022.04.13.488148v1) alongside the LSTM.
+
+## Long-short term memory network
+A Long-short-term memory (LSTM) model which is trained on sequences of EEG data. This model is described in detail and published in our [second paper](https://www.biorxiv.org/content/10.1101/2022.04.13.488148v1).
 
 ---
 
