@@ -52,8 +52,7 @@ def test_simulation_add():
 def create_forward_model_test(pth_fwd='temp/ico2/', sampling='ico2'):
     # Create a forward model
     forward.create_forward_model(pth_fwd, sampling=sampling)
-    info = forward.get_info()
-    info['sfreq'] = 100
+    info = forward.get_info(sfreq=100)
     fwd = forward.create_forward_model(info=info)
     fwd_free = forward.create_forward_model(info=info, fixed_ori=False)
         

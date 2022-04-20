@@ -290,7 +290,7 @@ class Net:
             return self
     @staticmethod
     def generate_batches(x, y, batch_size):
-            print('start generator')
+            # print('start generator')
             n_batches = int(len(x) / batch_size)
             x = x[:int(n_batches*batch_size)]
             y = y[:int(n_batches*batch_size)]
@@ -775,6 +775,14 @@ class Net:
         '''
         if self.model_type.lower() == 'convdip':
             self._build_convdip_model()
+        elif self.model_type.lower() == 'fc':
+            self.n_lstm_layers = 0
+            self.n_lstm_units = 0
+            self._build_temporal_model()
+        elif self.model_type.lower() == 'lstm':
+            self.n_dense_layers = 0
+            self.n_dense_units = 0
+            self._build_temporal_model()
         else:
             self._build_temporal_model()
         

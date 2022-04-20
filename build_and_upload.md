@@ -4,20 +4,29 @@
 1. Add changes to the changelog and 
 2. update the version number in setup.py so people can track the development of the package.
 
-## activate your dev environment
+## Activate your dev environment
 ```
 workon esienv
 ```
 
-## Build the package
+## Test locally
+First, test your code to see if everything is working fine.
+
+```
+test_local.bat
+```
+
+## Commit changes
+Commit your changes.
+
+```
+git commit -m "commit message"
+```
+
+## Build the package and check them
 
 ```
 py -m build --wheel
-```
-
-## Check whether your builds are fine
-
-```
 twine check dist/*
 ```
 

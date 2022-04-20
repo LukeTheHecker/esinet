@@ -7,13 +7,16 @@ Make some changes to your code
 
 * Increment package version you can do that in the setup.py file
 
-* Open your conda-literate console and activate a suitable environment:
+* Open your console and activate a suitable environment:
 
 ```
-conda activate tf_gpu2
+workon esienv
 ```
 
 * add changes to the changelog 
+
+## Test it
+
 
 ## Pack it
 Pack your package using:

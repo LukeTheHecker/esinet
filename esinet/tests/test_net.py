@@ -4,13 +4,12 @@ from .. import forward
 from .. import Net
 
 # Crate forward model
-info = forward.get_info()
-info['sfreq'] = 100
+info = forward.get_info(sfreq=100)
 sampling = 'ico3'
 fwd = forward.create_forward_model(sampling=sampling)
 
 @pytest.mark.parametrize("duration_of_trial", [0.0, 0.1, (0.0, 0.1)])
-@pytest.mark.parametrize("model_type", ['', 'convdip'])
+@pytest.mark.parametrize("model_type", ['lstm', 'fc', 'convdip'])
 def test_net(duration_of_trial,model_type):
     settings = dict(duration_of_trial=duration_of_trial)
     sim = simulation.Simulation(fwd, info, settings=settings)

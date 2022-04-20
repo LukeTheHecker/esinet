@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0 20.04.2022
+* Support for LSTM, Fully-Connected and ConvDip models
+* Most recent code basis which served for the LSTM bioRxiv preprint
+
 ## 0.1.0 19.08.2021
 * Changed API from functional to object-oriented
 * New Tutorials

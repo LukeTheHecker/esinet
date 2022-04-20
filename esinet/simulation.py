@@ -81,7 +81,7 @@ class Simulation:
         self.fwd = deepcopy(fwd)
         self.fwd.pick_channels(info['ch_names'])
         self.check_info(deepcopy(info))
-        self.info['sfreq'] = self.settings['sample_frequency']
+        # self.info['sfreq'] = self.settings['sample_frequency']
         self.prepare_simulation_info()
         self.subject = self.fwd['src'][0]['subject_his_id']
         self.n_jobs = n_jobs

@@ -63,7 +63,7 @@ def create_forward_model(sampling='ico3', info=None, verbose=0, fixed_ori=True):
     return fwd
 
 
-def get_info(kind='easycap-M10'):
+def get_info(kind='easycap-M10', sfreq=1000):
     ''' Create some generic mne.Info object.
     
     Parameters
@@ -81,7 +81,6 @@ def get_info(kind='easycap-M10'):
     # https://mne.tools/stable/auto_tutorials/simulation/plot_creating_data_structures.html
 
     montage = mne.channels.make_standard_montage(kind)
-    sfreq = 1000 
     info = mne.create_info(montage.ch_names, sfreq, ch_types=['eeg']*len(montage.ch_names), verbose=0)
     info.set_montage(kind)
     return info
