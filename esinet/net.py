@@ -144,7 +144,7 @@ class Net:
         validation_split=0.1, epochs=50, metrics=None, device=None, 
         false_positive_penalty=2, delta=1., batch_size=8, loss=None, 
         sample_weight=None, return_history=False, dropout=0.2, patience=7, 
-        tensorboard=False, validation_freq=1):
+        tensorboard=False, validation_freq=1, revert_order=True):
         ''' Train the neural network using training data (eeg) and labels (sources).
         
         Parameters
@@ -253,11 +253,10 @@ class Net:
         print("fit model")
         n_samples = len(x_scaled)
         stop_idx = int(round(n_samples * (1-validation_split)))
-        gen = self.generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size)
+        gen = self.generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size, revert_order=revert_order)
         steps_per_epoch = stop_idx // batch_size
         validation_data = (pad_sequences(x_scaled[stop_idx:], dtype='float32'), pad_sequences(y_scaled[stop_idx:], dtype='float32'))
 
-        
         
         if device is None:
             # history = self.model.fit(x_scaled, y_scaled, 
@@ -289,7 +288,7 @@ class Net:
         else:
             return self
     @staticmethod
-    def generate_batches(x, y, batch_size):
+    def generate_batches(x, y, batch_size, revert_order=True):
             # print('start generator')
             n_batches = int(len(x) / batch_size)
             x = x[:int(n_batches*batch_size)]
@@ -306,10 +305,17 @@ class Net:
                 y_pad = []
                 for batch in range(n_batches):
                     # print(batch, len(x), batch*batch_size, (batch+1)*batch_size, x[batch*batch_size:(batch+1)*batch_size])
-                    x_padlet = pad_sequences( x[batch*batch_size:(batch+1)*batch_size], dtype='float32' )
-                    y_padlet = pad_sequences( y[batch*batch_size:(batch+1)*batch_size], dtype='float32' )
+                    x_batch = x[batch*batch_size:(batch+1)*batch_size]
+                    y_batch = y[batch*batch_size:(batch+1)*batch_size]
+                    if revert_order:
+                        if np.random.randn()>0:
+                            x_batch = np.flip(x_batch, axis=1)
+                            y_batch = np.flip(y_batch, axis=1)
+                    x_padlet = pad_sequences(x_batch , dtype='float32' )
+                    y_padlet = pad_sequences(y_batch , dtype='float32' )
+
                     
-                    
+                        
                     x_pad.append( x_padlet )
                     y_pad.append( y_padlet )
                 
