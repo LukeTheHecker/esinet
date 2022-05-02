@@ -17,7 +17,7 @@ from . import util
 DEFAULT_SETTINGS = {
     'method': 'standard',
     'number_of_sources': (1, 25),
-    'extents':  (1, 40),
+    'extents':  (1, 40),  # in millimeters
     'amplitudes': (0, 100),
     'shapes': 'both',
     'duration_of_trial': 1.0,
@@ -75,7 +75,6 @@ class Simulation:
         parallel=False, verbose=False):
         self.settings = settings
         
-
         self.source_data = None
         self.eeg_data = None
         self.fwd = deepcopy(fwd)
@@ -91,8 +90,7 @@ class Simulation:
         self.n_jobs = n_jobs
         self.parallel = parallel
         self.verbose = verbose
-        _, _, self.pos, _ = util.unpack_fwd(self.fwd)
-        self.distance_matrix = cdist(self.pos, self.pos)
+        
     
     def __add__(self, other):
         new_object = deepcopy(self)
@@ -112,7 +110,6 @@ class Simulation:
 
     def simulate(self, n_samples=10000):
         ''' Simulate sources and EEG data'''
-        
         self.n_samples = n_samples
         self.source_data = self.simulate_sources(n_samples)
         self.eeg_data = self.simulate_eeg()
@@ -338,6 +335,8 @@ class Simulation:
             if self.settings["region_growing"]:
                 # print("DO REGION GROWING")
                 d = get_n_order_indices(extents[i], src_center, self.neighbors)
+                # if isinstance(d, (int, float, np.int32)):
+                #     d = [d,]
                 dists = np.empty((self.pos.shape[0]))
                 dists[:] = np.inf
                 dists[d] = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))[d]
@@ -599,6 +598,10 @@ class Simulation:
         '''
         if self.settings is None:
             self.settings = DEFAULT_SETTINGS
+        
+        _, _, self.pos, _ = util.unpack_fwd(self.fwd)
+        self.distance_matrix = cdist(self.pos, self.pos)
+
         # Check for wrong keys:
         for key in self.settings.keys():
             if not key in DEFAULT_SETTINGS.keys():
@@ -618,6 +621,9 @@ class Simulation:
 
         if self.settings["region_growing"]:
             self.neighbors = self.calculate_neighbors()
+        if self.settings["region_growing"]:
+            # Convert extents from millimeters to orders
+            self.settings["extents"] = self.extents_to_orders()
 
     def calculate_neighbors(self):
         adj = mne.spatial_src_adjacency(self.fwd["src"]).toarray().astype(int)
@@ -660,6 +666,7 @@ class Simulation:
         # If input is a function -> call it and return the result
         if callable(val):
             return val()
+   
 
         if dtype==int:
             rng = random.randrange
@@ -670,9 +677,14 @@ class Simulation:
             raise AttributeError(msg)
 
         if isinstance(val, (list, tuple, np.ndarray)):
-            out = rng(*val)
-        elif isinstance(val, (int, float)):
-            out = val
+            if val[0] == val[1]:
+                out = dtype(val[0])
+            else:
+                out = rng(*val)
+        else:
+            # If input is only a single value anyway, there is no range and it can
+            # be returned in the desired dtype.
+            out = dtype(val)
         return out
     
     def save(self, file_name):
@@ -800,6 +812,26 @@ class Simulation:
         print("not implemented yet")
         return self
     
+    def extents_to_orders(self):
+        extents = self.settings["extents"]
+        if isinstance(extents, (int, float)):
+            order = 0
+            while util.get_source_diam_from_order(order, self.fwd, dists=self.distance_matrix) < extents:
+                order += 1
+            extents = order
+        else:
+            lower_target, upper_target = extents
+            lower_order = 0
+            while util.get_source_diam_from_order(lower_order, self.fwd, dists=self.distance_matrix) < lower_target:
+                lower_order += 1
+                # print(lower_order, util.get_source_diam_from_order(lower_order, self.fwd, dists=self.distance_matrix))
+            upper_order = 0
+            while util.get_source_diam_from_order(upper_order, self.fwd, dists=self.distance_matrix) < upper_target:
+                upper_order += 1
+                # print(upper_order, util.get_source_diam_from_order(upper_order, self.fwd, dists=self.distance_matrix))
+            extents = (lower_order, upper_order)
+        return extents
+    
     
 def get_n_order_indices(order, pick_idx, neighbors):
     ''' Iteratively performs region growing by selecting neighbors of 
@@ -808,10 +840,10 @@ def get_n_order_indices(order, pick_idx, neighbors):
     assert order == round(order), "Neighborhood order must be a whole number"
     order = int(order)
     if order == 0:
-        return pick_idx
+        return [pick_idx,]
     flatten = lambda t: [item for sublist in t for item in sublist]
     # print("y")
-    current_indices = [pick_idx]
+    current_indices = [pick_idx,]
     for cnt in range(order):
         # current_indices = list(np.array( current_indices ).flatten())
         new_indices = [neighbors[i] for i in current_indices]

@@ -14,7 +14,7 @@ def test_create_info():
 
 
 @pytest.mark.parametrize("number_of_sources", [2,])
-@pytest.mark.parametrize("extents", [1, 3])
+@pytest.mark.parametrize("extents", [25, (1,50)])
 @pytest.mark.parametrize("amplitudes", [1,])
 @pytest.mark.parametrize("shapes", ['both', 'gaussian', 'flat'])
 @pytest.mark.parametrize("duration_of_trial", [0, 0.1, (0,0.1)])

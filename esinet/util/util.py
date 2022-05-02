@@ -388,6 +388,7 @@ def get_source_diam_from_order(order, fwd, dists=None):
     pos = unpack_fwd(fwd)[2]
     if dists is None:
         dists = cdist(pos, pos)
+    dists[dists==0] = np.nan
     return np.median(np.nanmin(dists, axis=0))*(2+order)
 
 def get_eeg_from_source(stc, fwd, info, tmin=-0.2):
