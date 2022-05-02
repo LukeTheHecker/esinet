@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.3 02.05.2022
+* Implemented the reverting of the time dimension of training data as data augmentation. This improved validation loss in our tests.
+
 ## 0.2.2 02.05.2022
 * Introducing region growing for source simulations. Region growing allows for
   more realistic source simulations that do not extend spherically but along a
