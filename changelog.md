@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2 02.05.2022
+* Introducing region growing for source simulations. Region growing allows for
+  more realistic source simulations that do not extend spherically but along a
+  graph of connected surface dipoles. See esinet.Simulation.settings for
+  details.
+
+## 0.2.1 ??.04.2022
+* Minor changes which were forgotten.
+
+
 ## 0.2.0 20.04.2022
 * Support for LSTM, Fully-Connected and ConvDip models
 * Most recent code basis which served for the LSTM bioRxiv preprint

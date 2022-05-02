@@ -8,6 +8,7 @@ from copy import deepcopy
 import logging
 from time import time
 from scipy.stats import pearsonr
+from scipy.spatial.distance import cdist
 from tqdm.notebook import tqdm
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -371,6 +372,23 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0),
     source_estimate = neural_net.predict(data_obj)
 
     return source_estimate
+
+def get_source_diam_from_order(order, fwd, dists=None):
+    ''' Calculate the estimated source diameter given the neighborhood order.
+     Useful to calculate source extents using the region_growing method in the
+     esinet.Simulation object.
+
+    Parameters
+    ----------
+    order : int,
+        The neighborhood order of interest
+    fwd : mne.Forward
+        The forward model.
+    '''
+    pos = unpack_fwd(fwd)[2]
+    if dists is None:
+        dists = cdist(pos, pos)
+    return np.median(np.nanmin(dists, axis=0))*(2+order)
 
 def get_eeg_from_source(stc, fwd, info, tmin=-0.2):
     ''' Get EEG from source by projecting source activity through the lead field.

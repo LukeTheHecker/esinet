@@ -6,7 +6,7 @@ fwd = forward.create_forward_model(sampling='ico3')
 info = forward.get_info()
 
 def test_create_fwd_model():
-    sampling = 'ico3'
+    sampling = 'ico1'
     fwd = forward.create_forward_model(sampling=sampling)
 
 def test_create_info():
@@ -14,7 +14,7 @@ def test_create_info():
 
 
 @pytest.mark.parametrize("number_of_sources", [2,])
-@pytest.mark.parametrize("extents", [1,])
+@pytest.mark.parametrize("extents", [1, 3])
 @pytest.mark.parametrize("amplitudes", [1,])
 @pytest.mark.parametrize("shapes", ['both', 'gaussian', 'flat'])
 @pytest.mark.parametrize("duration_of_trial", [0, 0.1, (0,0.1)])
@@ -22,10 +22,11 @@ def test_create_info():
 @pytest.mark.parametrize("target_snr", [5, ])
 @pytest.mark.parametrize("beta", [1, ])
 @pytest.mark.parametrize("method", ['standard', 'noise', 'mixed'])
+@pytest.mark.parametrize("region_growing", [True, False])
 @pytest.mark.parametrize("parallel", [True, False])
 def test_simulation( number_of_sources, extents, amplitudes,
         shapes, duration_of_trial, sample_frequency, target_snr, beta,
-        method, parallel):
+        method, region_growing, parallel):
 
     settings = {
             'number_of_sources': number_of_sources,
@@ -36,7 +37,8 @@ def test_simulation( number_of_sources, extents, amplitudes,
             'sample_frequency': sample_frequency,
             'target_snr': target_snr,
             'beta': beta,
-            'method': method
+            'method': method,
+            'region_growing': region_growing,
         }
 
     sim = simulation.Simulation(fwd, info, settings=settings, parallel=parallel)

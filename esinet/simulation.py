@@ -16,15 +16,16 @@ from . import util
 
 DEFAULT_SETTINGS = {
     'method': 'standard',
-    'number_of_sources': (1, 10),
-    'extents':  (5,40),
-    'amplitudes': (1, 10),
+    'number_of_sources': (1, 25),
+    'extents':  (1, 40),
+    'amplitudes': (0, 100),
     'shapes': 'both',
     'duration_of_trial': 1.0,
     'sample_frequency': 100,
     'target_snr': (2, 20),
     'beta': (0.5, 1.5),  # (0, 3),
-    'exponent': 3
+    'exponent': 3,
+    'region_growing': True,
 }
 
 class Simulation:
@@ -73,14 +74,17 @@ class Simulation:
     def __init__(self, fwd, info, settings=DEFAULT_SETTINGS, n_jobs=-1, 
         parallel=False, verbose=False):
         self.settings = settings
-        self.check_settings()
-        self.settings['sample_frequency'] = info['sfreq']
+        
 
         self.source_data = None
         self.eeg_data = None
         self.fwd = deepcopy(fwd)
         self.fwd.pick_channels(info['ch_names'])
         self.check_info(deepcopy(info))
+
+        self.check_settings()
+        self.settings['sample_frequency'] = info['sfreq']
+
         # self.info['sfreq'] = self.settings['sample_frequency']
         self.prepare_simulation_info()
         self.subject = self.fwd['src'][0]['subject_his_id']
@@ -211,14 +215,14 @@ class Simulation:
     def simulate_source_noise(self):
         exponent = self.get_from_range(self.grid["exponent"], dtype=float)
         src_3d = util.create_n_dim_noise(self.grid["shape"], exponent=exponent)
-        print("src_3d shape: ", src_3d.shape)
+        # print("src_3d shape: ", src_3d.shape)
 
         duration_of_trial = self.get_from_range(
             self.settings['duration_of_trial'], dtype=float)
         n_time = np.clip(int(round(duration_of_trial * self.info['sfreq'])), 1, None)
         if len(src_3d.shape) == 3:
             src_3d = src_3d[:,:,:,np.newaxis]
-        src = np.zeros((1284, n_time))
+        src = np.zeros((self.pos.shape[0], n_time))
         for i in range(n_time):
             src[:, i] = util.vol_to_src(self.grid["neighbor_indices"], src_3d[:, :, :, i], self.pos)
         
@@ -281,8 +285,13 @@ class Simulation:
             self.settings['number_of_sources'], dtype=int)
 
         # Get amplitudes for each source
-        extents = [self.get_from_range(self.settings['extents'], dtype=float) 
-            for _ in range(number_of_sources)]
+        if self.settings["region_growing"]:
+            extents = [self.get_from_range(self.settings['extents'], dtype=int) 
+                for _ in range(number_of_sources)]
+        
+        else:
+            extents = [self.get_from_range(self.settings['extents'], dtype=float) 
+                for _ in range(number_of_sources)]
         
         # Decide shape of sources
         if self.settings['shapes'] == 'both':
@@ -325,9 +334,17 @@ class Simulation:
         ##############################################
         # Loop through source centers (i.e. seeds of source positions)
         for i, (src_center, shape, amplitude, signal) in enumerate(zip(src_centers, shapes, amplitudes, signals)):
-            # dists = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))
-            dists = self.distance_matrix[src_center]
-            d = np.where(dists<extents[i]/2)[0]
+
+            if self.settings["region_growing"]:
+                # print("DO REGION GROWING")
+                d = get_n_order_indices(extents[i], src_center, self.neighbors)
+                dists = np.empty((self.pos.shape[0]))
+                dists[:] = np.inf
+                dists[d] = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))[d]
+            else:
+                # dists = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))
+                dists = self.distance_matrix[src_center]
+                d = np.where(dists<extents[i]/2)[0]
 
             if shape == 'gaussian':
                 sd = np.clip(np.max(dists[d]) / 2, a_min=0.1, a_max=np.inf)  # <- works better
@@ -598,6 +615,15 @@ class Simulation:
             self.temporal = False
         else:
             self.temporal = True
+
+        if self.settings["region_growing"]:
+            self.neighbors = self.calculate_neighbors()
+
+    def calculate_neighbors(self):
+        adj = mne.spatial_src_adjacency(self.fwd["src"]).toarray().astype(int)
+        neighbors = np.array([np.where(a)[0] for a in adj], dtype=object)
+        return neighbors
+
                
     @staticmethod
     def get_pulse(pulse_len):
@@ -773,3 +799,24 @@ class Simulation:
         '''
         print("not implemented yet")
         return self
+    
+    
+def get_n_order_indices(order, pick_idx, neighbors):
+    ''' Iteratively performs region growing by selecting neighbors of 
+    neighbors for <order> iterations.
+    '''
+    assert order == round(order), "Neighborhood order must be a whole number"
+    order = int(order)
+    if order == 0:
+        return pick_idx
+    flatten = lambda t: [item for sublist in t for item in sublist]
+    # print("y")
+    current_indices = [pick_idx]
+    for cnt in range(order):
+        # current_indices = list(np.array( current_indices ).flatten())
+        new_indices = [neighbors[i] for i in current_indices]
+        new_indices = flatten( new_indices )
+        current_indices.extend(new_indices)
+        
+        current_indices = list(set(current_indices))
+    return current_indices
