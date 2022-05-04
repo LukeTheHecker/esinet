@@ -14,19 +14,20 @@ def test_create_info():
 
 
 @pytest.mark.parametrize("number_of_sources", [2,])
-@pytest.mark.parametrize("extents", [25, (1,50)])
+@pytest.mark.parametrize("extents", [(1,20),])
 @pytest.mark.parametrize("amplitudes", [1,])
-@pytest.mark.parametrize("shapes", ['both', 'gaussian', 'flat'])
-@pytest.mark.parametrize("duration_of_trial", [0, 0.1, (0,0.1)])
+@pytest.mark.parametrize("shapes", ['mixed', 'gaussian', 'flat'])
+@pytest.mark.parametrize("duration_of_trial", [0, 0.1, (0, 0.1)])
 @pytest.mark.parametrize("sample_frequency", [100,])
 @pytest.mark.parametrize("target_snr", [5, ])
 @pytest.mark.parametrize("beta", [1, ])
 @pytest.mark.parametrize("method", ['standard', 'noise', 'mixed'])
-@pytest.mark.parametrize("region_growing", [True, False])
+@pytest.mark.parametrize("source_spread", ['region_growing', 'spherical', 'mixed'])
+@pytest.mark.parametrize("source_number_weighting", [True, False])
 @pytest.mark.parametrize("parallel", [True, False])
 def test_simulation( number_of_sources, extents, amplitudes,
         shapes, duration_of_trial, sample_frequency, target_snr, beta,
-        method, region_growing, parallel):
+        method, source_spread, source_number_weighting, parallel):
 
     settings = {
             'number_of_sources': number_of_sources,
@@ -38,7 +39,8 @@ def test_simulation( number_of_sources, extents, amplitudes,
             'target_snr': target_snr,
             'beta': beta,
             'method': method,
-            'region_growing': region_growing,
+            'source_spread': source_spread,
+            'source_number_weighting': source_number_weighting
         }
 
     sim = simulation.Simulation(fwd, info, settings=settings, parallel=parallel)

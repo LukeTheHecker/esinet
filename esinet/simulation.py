@@ -17,15 +17,16 @@ from . import util
 DEFAULT_SETTINGS = {
     'method': 'standard',
     'number_of_sources': (1, 25),
-    'extents':  (1, 40),  # in millimeters
+    'extents':  (1, 50),  # in millimeters
     'amplitudes': (0, 100),
-    'shapes': 'both',
+    'shapes': 'mixed',
     'duration_of_trial': 1.0,
     'sample_frequency': 100,
-    'target_snr': (2, 20),
-    'beta': (0.5, 1.5),  # (0, 3),
+    'target_snr': (1, 20),
+    'beta': (0.5, 3),  # (0, 3),
     'exponent': 3,
-    'region_growing': True,
+    'source_spread': "mixed",
+    'source_number_weighting': True,
 }
 
 class Simulation:
@@ -46,7 +47,7 @@ class Simulation:
             the current of the source in nAm
         shapes : str
             How the amplitudes evolve over space. Can be 'gaussian' or 'flat' 
-            (i.e. uniform) or 'both'.
+            (i.e. uniform) or 'mixed'.
         duration_of_trial : int/float
             specifies the duration of a trial.
         sample_frequency : int
@@ -90,7 +91,7 @@ class Simulation:
         self.n_jobs = n_jobs
         self.parallel = parallel
         self.verbose = verbose
-        
+        self.diams = None
     
     def __add__(self, other):
         new_object = deepcopy(self)
@@ -120,7 +121,7 @@ class Simulation:
         pass
     
     def simulate_sources(self, n_samples):
-
+        
         n_dip = self.pos.shape[0]
         # source_data = np.zeros((n_samples, n_dip, n_time), dtype=np.float32)
         source_data = []
@@ -178,7 +179,6 @@ class Simulation:
         #         sfreq=self.settings['sample_frequency'], subject=self.subject) 
         # else:
         sources = self.sources_to_sourceEstimates(source_data)
-        # print('Here y go: ', type(sources), sources)
         return sources
 
     def prepare_grid(self):
@@ -212,7 +212,6 @@ class Simulation:
     def simulate_source_noise(self):
         exponent = self.get_from_range(self.grid["exponent"], dtype=float)
         src_3d = util.create_n_dim_noise(self.grid["shape"], exponent=exponent)
-        # print("src_3d shape: ", src_3d.shape)
 
         duration_of_trial = self.get_from_range(
             self.settings['duration_of_trial'], dtype=float)
@@ -257,7 +256,7 @@ class Simulation:
             the current of the source in nAm
         shapes : str
             How the amplitudes evolve over space. Can be 'gaussian' or 'flat' 
-            (i.e. uniform) or 'both'.
+            (i.e. uniform) or 'mixed'.
         duration_of_trial : int/float
             specifies the duration of a trial.
         sample_frequency : int
@@ -277,21 +276,28 @@ class Simulation:
         
         ###########################################
         # Select ranges and prepare some variables
-        # Get number of sources is a range:
-        number_of_sources = self.get_from_range(
-            self.settings['number_of_sources'], dtype=int)
-
-        # Get amplitudes for each source
-        if self.settings["region_growing"]:
-            extents = [self.get_from_range(self.settings['extents'], dtype=int) 
-                for _ in range(number_of_sources)]
-        
+        # Get number of sources:
+        if not self.settings["source_number_weighting"] or isinstance(self.settings["number_of_sources"], (float, int)):
+            number_of_sources = self.get_from_range(
+                self.settings['number_of_sources'], dtype=int)
         else:
-            extents = [self.get_from_range(self.settings['extents'], dtype=float) 
-                for _ in range(number_of_sources)]
+            population = np.arange(*self.settings["number_of_sources"])
+            weights = 1 / population
+            weights /= weights.sum()
+            number_of_sources = random.choices(population=population,weights=weights,k=1)[0]
+
+        
+        if self.settings["source_spread"] == 'mixed':
+            source_spreads = [np.random.choice(['region_growing', 'spherical']) for _ in range(number_of_sources)]
+        else:
+            source_spreads = [self.settings["source_spread"] for _ in range(number_of_sources)]
+
+   
+        extents = [self.get_from_range(self.settings['extents'], dtype=float) 
+            for _ in range(number_of_sources)]
         
         # Decide shape of sources
-        if self.settings['shapes'] == 'both':
+        if self.settings['shapes'] == 'mixed':
             shapes = ['gaussian', 'flat']*number_of_sources
             np.random.shuffle(shapes)
             shapes = shapes[:number_of_sources]
@@ -310,7 +316,7 @@ class Simulation:
             self.settings['duration_of_trial'], dtype=float
         )
         signal_length = int(round(self.settings['sample_frequency']*duration_of_trial))
-        # print(signal_length)
+
         if signal_length > 1:
             signals = []
             for _ in range(number_of_sources):
@@ -327,14 +333,12 @@ class Simulation:
         
         # sourceMask = np.zeros((self.pos.shape[0]))
         source = np.zeros((self.pos.shape[0], signal_length))
-        
         ##############################################
         # Loop through source centers (i.e. seeds of source positions)
-        for i, (src_center, shape, amplitude, signal) in enumerate(zip(src_centers, shapes, amplitudes, signals)):
-
-            if self.settings["region_growing"]:
-                # print("DO REGION GROWING")
-                d = get_n_order_indices(extents[i], src_center, self.neighbors)
+        for i, (src_center, shape, amplitude, signal, source_spread) in enumerate(zip(src_centers, shapes, amplitudes, signals, source_spreads)):
+            if source_spread == "region_growing":
+                order = self.extents_to_orders(extents[i])
+                d = np.array(get_n_order_indices(order, src_center, self.neighbors))
                 # if isinstance(d, (int, float, np.int32)):
                 #     d = [d,]
                 dists = np.empty((self.pos.shape[0]))
@@ -344,10 +348,18 @@ class Simulation:
                 # dists = np.sqrt(np.sum((self.pos - self.pos[src_center, :])**2, axis=1))
                 dists = self.distance_matrix[src_center]
                 d = np.where(dists<extents[i]/2)[0]
-
+        
             if shape == 'gaussian':
-                sd = np.clip(np.max(dists[d]) / 2, a_min=0.1, a_max=np.inf)  # <- works better
-                activity = np.expand_dims(util.gaussian(dists, 0, sd) * amplitude, axis=1) * signal
+                
+                if len(d) < 2:                    
+                    activity = np.zeros((len(dists), 1))
+                    activity[d, 0] = amplitude
+            
+                    
+                    activity = activity * signal
+                else:
+                    sd = np.clip(np.max(dists[d]) / 2, a_min=0.1, a_max=np.inf)  # <- works better
+                    activity = np.expand_dims(util.gaussian(dists, 0, sd) * amplitude, axis=1) * signal
                 source += activity
             elif shape == 'flat':
                 if not isinstance(signal, (list, np.ndarray)):
@@ -369,8 +381,7 @@ class Simulation:
             else:
                 msg = BaseException("shape must be of type >string< and be either >gaussian< or >flat<.")
                 raise(msg)
-            # sourceMask[d] = 1
-
+        
         # Document the sample
         d = dict(number_of_sources=number_of_sources, positions=self.pos[src_centers], extents=extents, amplitudes=amplitudes, shapes=shapes, target_snr=0, duration_of_trials=duration_of_trial)
         self.simulation_info = self.simulation_info.append(d, ignore_index=True)
@@ -618,12 +629,11 @@ class Simulation:
             self.temporal = False
         else:
             self.temporal = True
+        
+        self.neighbors = self.calculate_neighbors()
+        
 
-        if self.settings["region_growing"]:
-            self.neighbors = self.calculate_neighbors()
-        if self.settings["region_growing"]:
-            # Convert extents from millimeters to orders
-            self.settings["extents"] = self.extents_to_orders()
+            
 
     def calculate_neighbors(self):
         adj = mne.spatial_src_adjacency(self.fwd["src"]).toarray().astype(int)
@@ -812,25 +822,29 @@ class Simulation:
         print("not implemented yet")
         return self
     
-    def extents_to_orders(self):
-        extents = self.settings["extents"]
+    def extents_to_orders(self, extents):
+        ''' Convert extents (source diameter in mm) to neighborhood orders.
+        '''
+        if self.diams is None:
+            self.get_diams_per_order()
         if isinstance(extents, (int, float)):
-            order = 0
-            while util.get_source_diam_from_order(order, self.fwd, dists=self.distance_matrix) < extents:
-                order += 1
-            extents = order
+            order = np.argmin(abs(self.diams-extents))
         else:
-            lower_target, upper_target = extents
-            lower_order = 0
-            while util.get_source_diam_from_order(lower_order, self.fwd, dists=self.distance_matrix) < lower_target:
-                lower_order += 1
-                # print(lower_order, util.get_source_diam_from_order(lower_order, self.fwd, dists=self.distance_matrix))
-            upper_order = 0
-            while util.get_source_diam_from_order(upper_order, self.fwd, dists=self.distance_matrix) < upper_target:
-                upper_order += 1
-                # print(upper_order, util.get_source_diam_from_order(upper_order, self.fwd, dists=self.distance_matrix))
-            extents = (lower_order, upper_order)
-        return extents
+            order = (np.argmin(abs(self.diams-extents[0])), np.argmin(abs(self.diams-extents[1])))
+
+        return order
+    
+    def get_diams_per_order(self):
+        ''' Calculate the estimated source diameter per neighborhood order.
+        '''
+        diams = []
+        diam = 0
+        order = 0
+        while diam<100:
+            diam = util.get_source_diam_from_order(order, self.fwd, dists=deepcopy(self.distance_matrix))
+            diams.append( diam )
+            order += 1
+        self.diams = np.array(diams)
     
     
 def get_n_order_indices(order, pick_idx, neighbors):

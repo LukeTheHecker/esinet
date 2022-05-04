@@ -68,7 +68,8 @@ class Net:
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
         n_dense_units=100, n_lstm_units=75, activation_function='relu', 
         n_filters=8, kernel_size=(3,3), n_jobs=-1, model_type='auto', 
-        scale_individually=True, verbose=True):
+        scale_individually=True, rescale_sources='brent', 
+        verbose=True):
 
         self._embed_fwd(fwd)
         
@@ -86,6 +87,7 @@ class Net:
         self.model_type = model_type
         self.compiled = False
         self.scale_individually = scale_individually
+        self.rescale_sources = rescale_sources
         self.verbose = verbose
 
     def _embed_fwd(self, fwd):
@@ -568,8 +570,14 @@ class Net:
             predicted_sources = self.predict_sources(eeg_prep)       
 
         # Rescale Predicitons
-        # predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
-        predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
+        if self.rescale_sources.lower() == 'brent':
+            predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
+        elif self.rescale_sources.lower() == 'rms':
+            predicted_sources_scaled = self._scale_p_wrap(predicted_sources, eeg)
+        else:
+            print("Warning: <rescale_sources> is set to {self.rescale_sources}, but needs to be brent or rms. Setting to default (brent)")
+            predicted_sources_scaled = self._solve_p_wrap(predicted_sources, eeg)
+
 
 
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
@@ -639,14 +647,15 @@ class Net:
         ''' Wrapper for parallel (or, alternatively, serial) scaling of 
         predicted sources.
         '''
-        assert len(y_est.shape) == 3, 'Sources must be 3-Dimensional'
-        assert len(x_true.shape) == 3, 'EEG must be 3-Dimensional'
+        # assert len(y_est.shape) == 3, 'Sources must be 3-Dimensional'
+        # assert len(x_true.shape) == 3, 'EEG must be 3-Dimensional'
 
         y_est_scaled = deepcopy(y_est)
 
-        for trial in range(x_true.shape[0]):
-            for time in range(x_true.shape[2]):
-                y_est_scaled[trial, :, time] = self.solve_p(y_est[trial, :, time], x_true[trial, :, time])
+        for trial, _ in enumerate(x_true):
+            for time in range(x_true[trial].shape[-1]):
+                scaled = self.solve_p(y_est[trial][:, time], x_true[trial][:, time])
+                y_est_scaled[trial][:, time] = scaled
 
         return y_est_scaled
 

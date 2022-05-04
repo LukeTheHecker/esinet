@@ -1,4 +1,4 @@
-call pytest -x esinet\tests
+@REM call pytest -x esinet\tests
 
 call cd tutorials
 call pytest --nbmake tutorial_1.ipynb
