@@ -10,8 +10,8 @@ from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional,
     TimeDistributed, InputLayer, Activation, Reshape, concatenate, Concatenate, 
     Dropout, Conv2D)
 from tensorflow.keras import backend as K
-from keras.layers.core import Lambda
-from keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.layers import Lambda
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 from scipy.optimize import minimize_scalar
 # import pickle as pkl
 import dill as pkl

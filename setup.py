@@ -13,7 +13,8 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/LukeTheHecker/esinet",
     packages=setuptools.find_packages(),
-    install_requires=['tensorflow>=2.4.1','mne>=0.22.0', 'scipy', 'colorednoise', 'joblib', 'jupyter', 'ipykernel', 'matplotlib', 'pyvista>=0.27.4', 'pyvistaqt>=0.3.0', 'vtk>=9.0.1', 'tqdm', 'pytest', 'dill', 'scikit-learn', 'pandas'],
+    # install_requires=['tensorflow>=2.4.1','mne>=0.22.0', 'scipy', 'colorednoise', 'joblib', 'jupyter', 'ipykernel', 'matplotlib', 'pyvista>=0.27.4', 'pyvistaqt>=0.3.0', 'vtk>=9.0.1', 'tqdm', 'pytest', 'dill', 'scikit-learn', 'pandas'],
+    install_requires=['tensorflow>=2.4.1','mne>=0.22.0', 'scipy', 'colorednoise', 'joblib', 'matplotlib', 'pyvista', 'pyvistaqt', 'vtk', 'tqdm', 'pytest', 'dill', 'scikit-learn', 'pandas'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
