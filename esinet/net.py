@@ -210,7 +210,7 @@ class Net:
                 log_dir=log_dir, histogram_freq=1)
             callbacks = [es, tensorboard_callback]
         else:
-            callbacks = []#[es]
+            callbacks = [es,]
         if optimizer is None:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
             # optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
