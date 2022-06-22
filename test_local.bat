@@ -1,1 +1,1 @@
-call pytest esinet\tests
+call pytest -x esinet\tests

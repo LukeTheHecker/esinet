@@ -2,12 +2,23 @@
 *.pkl
 *.stc
 *__pycache__
+*.npy
+*.dil
+*.gz
+*.png
+*.pptx
+*.data*
+*.pb
+*.index
 
 dev
 .vscode
-
+logs
 notes
 env
+evaluate/figures
+evaluate
+keras-tuner
 build
 evaluate
 keras-tuner
@@ -15,3 +26,4 @@ logs
 .pytest_cache
 dist
 esinet.egg-info
+dev

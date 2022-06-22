@@ -1,10 +1,33 @@
 # Changelog
 
-## 0.1.2 09.12.2021
-* Fixed bug that occured for temporal simulations using the "duration_of_trial" key in the settings dictionary required for the simulation.Simulation object. Thanks to Winnie for the bug report! :-)
+## 0.2.4 04.05.2022
+* Re-implementation of the Brent-optimization method for source scaling instead of the RMS method.
 
-## 0.1.1 27.08.2021
-* Reverted some changes that turned out not to be functional yet
+### Simulations  
+* increased default source extent from 1-40 mm to 1-50 mm 
+* reduced default target_snr from 2-20 to 1-20
+* changed default beta exponent from 0.5-1.5 to 0.5-3 to allow for smoother source time courses overall
+* source_spread can now be mixed (region growing AND spherical expansion)
+* introduced source_number_weighting:  
+*weight = 1/number_of_sources*  
+i.e., the sampling weight is the inverse of the number of sources. Example: If you desire between 1 and 5 sources, the change of having a single source is 48 %, the chance of having 5 sources is 12 %. 
+
+## 0.2.3 02.05.2022
+* Implemented the reverting of the time dimension of training data as data augmentation. This improved validation loss in our tests.
+
+## 0.2.2 02.05.2022
+* Introducing region growing for source simulations. Region growing allows for
+  more realistic source simulations that do not extend spherically but along a
+  graph of connected surface dipoles. See esinet. Simulation.settings for
+  details.
+
+## 0.2.1 ??.04.2022
+* Minor changes which were forgotten.
+
+
+## 0.2.0 20.04.2022
+* Support for LSTM, Fully-Connected and ConvDip models
+* Most recent code basis which served for the LSTM bioRxiv preprint
 
 ## 0.1.0 19.08.2021
 * Changed API from functional to object-oriented
