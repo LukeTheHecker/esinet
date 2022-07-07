@@ -12,6 +12,8 @@ from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional,
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+# from tensorflow.keras.utils import pad_sequences
+
 from scipy.optimize import minimize_scalar
 # import pickle as pkl
 import dill as pkl
@@ -66,7 +68,7 @@ class Net:
     '''
     
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
-        n_dense_units=100, n_lstm_units=75, activation_function='relu', 
+        n_dense_units=100, n_lstm_units=75, activation_function='tanh', 
         n_filters=8, kernel_size=(3,3), n_jobs=-1, model_type='auto', 
         scale_individually=True, rescale_sources='brent', 
         verbose=True):

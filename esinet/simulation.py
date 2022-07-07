@@ -18,7 +18,7 @@ DEFAULT_SETTINGS = {
     'method': 'standard',
     'number_of_sources': (1, 25),
     'extents':  (1, 50),  # in millimeters
-    'amplitudes': (0, 100),
+    'amplitudes': (1e-3, 100),
     'shapes': 'mixed',
     'duration_of_trial': 1.0,
     'sample_frequency': 100,
@@ -27,6 +27,8 @@ DEFAULT_SETTINGS = {
     'exponent': 3,
     'source_spread': "mixed",
     'source_number_weighting': True,
+    'source_time_course': "random",
+
 }
 
 class Simulation:
@@ -319,10 +321,14 @@ class Simulation:
 
         if signal_length > 1:
             signals = []
-            for _ in range(number_of_sources):
-                signal = cn.powerlaw_psd_gaussian(self.get_from_range(self.settings['beta'], dtype=float), signal_length) 
-                signal /= np.max(np.abs(signal))
-                signals.append(signal)
+            
+            if self.settings["source_time_course"].lower() == "pulse":
+                signals = [self.get_biphasic_pulse(signal_length) for _ in range(number_of_sources)]
+            else:
+                for _ in range(number_of_sources):
+                    signal = cn.powerlaw_psd_gaussian(self.get_from_range(self.settings['beta'], dtype=float), signal_length) 
+                    signal /= np.max(np.abs(signal))
+                    signals.append(signal)
             
             sample_frequency = self.settings['sample_frequency']
         else:  # else its a single instance
@@ -595,7 +601,9 @@ class Simulation:
         
         x_gfp = np.std(x, axis=1)
         rms_x = np.median(x_gfp)  # np.mean(np.max(np.abs(x_gfp), axis=1))  # x.max()
-        
+        if rms_x == 0:  
+            # in case most of the signal is zero, e.g. when using biphasic pulses
+            rms_x = abs(x_gfp).max()
         # rms_noise = rms(noise-np.mean(noise))
         noise_scaler = rms_x / (rms_noise*snr)
         # print(f'rms_x = {rms_x}\nrms_noise = {rms_noise}\n\tScaling by {noise_scaler} to yield snr of {snr}')
@@ -659,6 +667,31 @@ class Simulation:
         signal = np.sin(2*np.pi*freq*time)
         return signal
     
+    @staticmethod
+    def get_biphasic_pulse(pulse_len, center_fraction=1, temporal_jitter=0.):
+        ''' Returns a biphasic pulse of given length.
+        
+        Parameters
+        ----------
+        x : int
+            the number of data points
+
+        '''
+        pulse_len = int(pulse_len)
+        freq = (1/pulse_len) *center_fraction#/ 2
+        time = np.linspace(-pulse_len/2, pulse_len/2, pulse_len)
+        
+        jitter = np.random.randn()*temporal_jitter
+        signal = np.sin(2*np.pi*freq*time + jitter)
+        crop_start = int(pulse_len/2 - pulse_len/center_fraction/2)
+        crop_stop = int(pulse_len/2 + pulse_len/center_fraction/2)
+        
+        # signal[(time<-1) | (time>1)] = 0
+        signal[:crop_start] = 0
+        signal[crop_stop:] = 0
+        signal *= np.random.choice([-1,1])
+        return signal
+
     @staticmethod
     def get_from_range(val, dtype=int):
         ''' If list of two integers/floats is given this method outputs a value in between the two values.
