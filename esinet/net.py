@@ -1013,16 +1013,19 @@ class Net:
     def _build_perceptron_model(self):
         ''' Build the artificial neural network model using Dense layers.
         '''
+        input_shape = (None, None, self.n_channels)
+        tf.keras.backend.set_image_data_format('channels_last')
+
         self.model = keras.Sequential()
         # Add hidden layers
         for _ in range(self.n_dense_layers):
-            self.model.add(Dense(units=self.n_dense_units,
-                                activation=self.activation_function))
+            self.model.add(TimeDistributed(Dense(units=self.n_dense_units,
+                                activation=self.activation_function)))
         # Add output layer
-        self.model.add(Dense(self.n_dipoles, activation='linear'))
+        self.model.add(TimeDistributed(Dense(self.n_dipoles, activation='linear')))
         
         # Build model with input layer
-        self.model.build(input_shape=(None, self.n_channels))
+        self.model.build(input_shape=input_shape)
 
     
 

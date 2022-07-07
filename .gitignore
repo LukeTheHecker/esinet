@@ -20,6 +20,9 @@ evaluate/figures
 evaluate
 keras-tuner
 build
+evaluate
+keras-tuner
+logs
 .pytest_cache
 dist
 esinet.egg-info
