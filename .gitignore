@@ -11,7 +11,7 @@
 *.pb
 *.index
 
-dev
+
 .vscode
 logs
 notes
@@ -26,4 +26,3 @@ logs
 .pytest_cache
 dist
 esinet.egg-info
-dev

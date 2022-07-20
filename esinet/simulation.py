@@ -28,7 +28,6 @@ DEFAULT_SETTINGS = {
     'source_spread': "mixed",
     'source_number_weighting': True,
     'source_time_course': "random",
-
 }
 
 class Simulation:
