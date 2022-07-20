@@ -113,13 +113,13 @@ def eeg_to_Epochs(data, pth_fwd, info=None, parallel=False):
     # else:
     if parallel:
         epochs = Parallel(n_jobs=-1, backend='loky')(delayed(mne.EpochsArray)(d[np.newaxis, :, :], info, verbose=0) for d in data)  
-        if 'eeg' in set(epochs[0].get_channel_types()):
-            epochs = Parallel(n_jobs=-1, backend='loky')(delayed(epoch.set_eeg_reference)('average', projection=True, verbose=0) for epoch in epochs)
+        # if 'eeg' in set(epochs[0].get_channel_types()):
+        #     epochs = Parallel(n_jobs=-1, backend='loky')(delayed(epoch.set_eeg_reference)('average', projection=True, verbose=0) for epoch in epochs)
     else:
         epochs = [mne.EpochsArray(d[np.newaxis, :, :], info, verbose=0) for d in data]
     
-        if 'eeg' in set(epochs[0].get_channel_types()):
-            epochs = [epoch.set_eeg_reference('average', projection=True, verbose=0) for epoch in epochs]
+        # if 'eeg' in set(epochs[0].get_channel_types()):
+        #     epochs = [epoch.set_eeg_reference('average', projection=True, verbose=0) for epoch in epochs]
             
     
     

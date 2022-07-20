@@ -644,7 +644,7 @@ class Simulation:
             
 
     def calculate_neighbors(self):
-        adj = mne.spatial_src_adjacency(self.fwd["src"]).toarray().astype(int)
+        adj = mne.spatial_src_adjacency(self.fwd["src"], verbose=0).toarray().astype(int)
         neighbors = np.array([np.where(a)[0] for a in adj], dtype=object)
         return neighbors
 
