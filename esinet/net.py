@@ -8,7 +8,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional, 
     TimeDistributed, InputLayer, Activation, Reshape, concatenate, Concatenate, 
-    Dropout, Conv2D)
+    Dropout, Conv2D, multiply)
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -68,7 +68,7 @@ class Net:
     '''
     
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
-        n_dense_units=100, n_lstm_units=75, activation_function='tanh', 
+        n_dense_units=200, n_lstm_units=32, activation_function='tanh', 
         n_filters=8, kernel_size=(3,3), n_jobs=-1, model_type='auto', 
         scale_individually=True, rescale_sources='brent', 
         verbose=True):
@@ -797,8 +797,6 @@ class Net:
             self.n_lstm_units = 0
             self._build_temporal_model()
         elif self.model_type.lower() == 'lstm':
-            self.n_dense_layers = 0
-            self.n_dense_units = 0
             self._build_temporal_model()
         else:
             self._build_temporal_model()
@@ -807,58 +805,97 @@ class Net:
         if self.verbose:
             self.model.summary()
     
+    
     def _build_temporal_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
-        if self.n_lstm_layers>0 and self.n_dense_layers>0:
-            name = "Mixed-model"
-        elif self.n_lstm_layers>0:
-            name = "LSTM-model"
-        else:
-            name = "Dense-model"
-        
+        name = "LSTM Model"
+        print("werks3")
         self.model = keras.Sequential(name=name)
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (None, self.n_channels)
-        self.model.add(InputLayer(input_shape=input_shape, name='Input'))
         
         # LSTM layers
-        if not isinstance(self.n_lstm_units, (tuple, list)):
-            self.n_lstm_units = [self.n_lstm_units] * self.n_lstm_layers
+        if isinstance(self.n_lstm_units, (tuple, list)):
+            self.n_lstm_units = self.n_lstm_units[0]
+        # Dropout
+        if isinstance(self.dropout, (tuple, list)):
+            self.dropout = self.dropout[0]
+
+        # Model Architecture
+        inputs = tf.keras.Input(shape=input_shape, name='Input')
+        ## FC-Path
+        fc1 = TimeDistributed(Dense(self.n_dense_units, 
+                    activation=self.activation_function), 
+                    name='FC1')(inputs)
+        fc1 = Dropout(self.dropout)(fc1)
+        direct_out = TimeDistributed(Dense(self.n_dipoles, 
+            activation="linear"),
+            name='FC2')(fc1)
+        # LSTM Path
+        lstm1 = Bidirectional(GRU(self.n_lstm_units, return_sequences=True, 
+            input_shape=(None, self.n_dense_units), dropout=self.dropout), 
+            name='LSTM1')(fc1)
+        mask = TimeDistributed(Dense(self.n_dipoles, 
+                    activation="sigmoid"), 
+                    name='Mask')(lstm1)
         
-        if not isinstance(self.dropout, (tuple, list)):
-            dropout = [self.dropout]*self.n_lstm_layers
-        else:
-            dropout = self.dropout
+        # Combination
+        multi = multiply([direct_out, mask], name="multiply")
+        self.model = tf.keras.Model(inputs=inputs, outputs=multi, name='Contextualizer')
         
-        for i in range(self.n_lstm_layers):
-            self.model.add(Bidirectional(LSTM(self.n_lstm_units[i], 
-                return_sequences=True, input_shape=input_shape),
-                name=f'RNN_{i}'))
-            self.model.add(Dropout(dropout[i], name=f'Dropout_{i}'))
-
-        # Hidden Dense layer(s):
-        if not isinstance(self.n_dense_units, (tuple, list)):
-            self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
+    # def _build_temporal_model(self):
+    #     ''' Build the temporal artificial neural network model using LSTM layers.
+    #     '''
+    #     if self.n_lstm_layers>0 and self.n_dense_layers>0:
+    #         name = "Mixed-model"
+    #     elif self.n_lstm_layers>0:
+    #         name = "LSTM-model"
+    #     else:
+    #         name = "Dense-model"
         
-        if not isinstance(self.dropout, (tuple, list)):
-            dropout = [self.dropout]*self.n_dense_layers
-        else:
-            dropout = self.dropout
+    #     self.model = keras.Sequential(name=name)
+    #     tf.keras.backend.set_image_data_format('channels_last')
+    #     input_shape = (None, self.n_channels)
+    #     self.model.add(InputLayer(input_shape=input_shape, name='Input'))
+        
+    #     # LSTM layers
+    #     if not isinstance(self.n_lstm_units, (tuple, list)):
+    #         self.n_lstm_units = [self.n_lstm_units] * self.n_lstm_layers
+        
+    #     if not isinstance(self.dropout, (tuple, list)):
+    #         dropout = [self.dropout]*self.n_lstm_layers
+    #     else:
+    #         dropout = self.dropout
+        
+    #     for i in range(self.n_lstm_layers):
+    #         self.model.add(Bidirectional(LSTM(self.n_lstm_units[i], 
+    #             return_sequences=True, input_shape=input_shape),
+    #             name=f'RNN_{i}'))
+    #         self.model.add(Dropout(dropout[i], name=f'Dropout_{i}'))
+
+    #     # Hidden Dense layer(s):
+    #     if not isinstance(self.n_dense_units, (tuple, list)):
+    #         self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
+        
+    #     if not isinstance(self.dropout, (tuple, list)):
+    #         dropout = [self.dropout]*self.n_dense_layers
+    #     else:
+    #         dropout = self.dropout
         
 
-        for i in range(self.n_dense_layers):
-            self.model.add(TimeDistributed(Dense(self.n_dense_units[i], 
-                activation=self.activation_function), name=f'FC_{i}'))
-            self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
+    #     for i in range(self.n_dense_layers):
+    #         self.model.add(TimeDistributed(Dense(self.n_dense_units[i], 
+    #             activation=self.activation_function), name=f'FC_{i}'))
+    #         self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
 
-        # Final For-each layer:
-        self.model.add(TimeDistributed(
-            Dense(self.n_dipoles, activation='linear'), name='FC_Out')
-        )
+    #     # Final For-each layer:
+    #     self.model.add(TimeDistributed(
+    #         Dense(self.n_dipoles, activation='linear'), name='FC_Out')
+    #     )
 
 
-        self.model.build(input_shape=input_shape)
+    #     self.model.build(input_shape=input_shape)
 
     # def _build_temporal_model(self):
     #     ''' Build the temporal artificial neural network model using LSTM layers.
