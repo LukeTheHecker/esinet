@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5 25.07.2022
+* Improved LSTM architecture
+
+
 ## 0.2.4 04.05.2022
 * Re-implementation of the Brent-optimization method for source scaling instead of the RMS method.
 
