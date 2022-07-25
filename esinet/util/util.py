@@ -294,7 +294,7 @@ def get_triangle_neighbors(tris_lr):
     return neighbors
 
 
-def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0), 
+def calculate_source(data_obj, fwd, duration_of_trial=None, baseline_span=(-0.2, 0.0), 
     data_span=(0, 0.5), n_samples=int(1e4), optimizer=None, learning_rate=0.001, 
     validation_split=0.1, n_epochs=100, metrics=None, device=None, delta=1, 
     batch_size=8, loss=None, false_positive_penalty=2, parallel=False, 
@@ -356,8 +356,10 @@ def calculate_source(data_obj, fwd, baseline_span=(-0.2, 0.0),
     '''
     # Calculate signal to noise ratio of the data
     target_snr = calc_snr_range(data_obj, baseline_span=baseline_span, data_span=data_span)
+    if duration_of_trial is None:
+        duration_of_trial = data_obj.times[-1] - data_obj.times[0]
     # Simulate sample M/EEG data
-    sim = simulation.Simulation(fwd, data_obj.info, settings=dict(duration_of_trial=0, target_snr=target_snr), parallel=parallel, verbose=True)
+    sim = simulation.Simulation(fwd, data_obj.info, settings=dict(duration_of_trial=duration_of_trial, target_snr=target_snr), parallel=parallel, verbose=True)
     sim.simulate(n_samples=n_samples)
     # Train neural network
     neural_net = net.Net(fwd, verbose=verbose)
