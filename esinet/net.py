@@ -798,7 +798,6 @@ class Net:
             self._build_temporal_model()
         else:
             self._build_temporal_model()
-        
 
         if self.verbose:
             self.model.summary()
@@ -808,7 +807,6 @@ class Net:
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
         name = "LSTM Model"
-        print("werks3")
         self.model = keras.Sequential(name=name)
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (None, self.n_channels)
