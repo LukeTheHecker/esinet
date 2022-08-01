@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import backend as K
+from scipy.spatial.distance import cdist
 
 
 def combi(y_true, y_pred):
@@ -37,6 +38,36 @@ def nmse_loss(reg=0.05):
         
         # Calc squared error
         error = K.square(true - pred)
+        
+
+        return K.mean(error) + K.mean(K.abs(pred))*reg
+
+    return loss
+
+def nmae_loss(reg=0.05):
+    ''' Weighted mean abs error (MSE) loss. A loss function that can be 
+    used with tensorflow/keras which calculates the MSE with a weighting of 
+    false positive predicitons. Set weight high for more conservative 
+    predictions.
+    Parameters
+    ----------
+    weight : float
+        Weighting factor which penalizes false positives.
+    min_val : float
+        The threshold below which the target is set to zero.
+    Return
+    ------
+    loss : loss function
+    '''
+    reg = tf.cast(reg, tf.float32)
+
+    def loss(true, pred):
+        # Scale to max(abs(x)) == 1
+        pred = scale_mat(pred)
+        true = scale_mat(true)
+        
+        # Calc squared error
+        error = K.abs(true - pred)
         
 
         return K.mean(error) + K.mean(K.abs(pred))*reg
@@ -178,4 +209,47 @@ def custom_loss(leadfield, fwd_scaler):
                                     (y_true, y_pred),
                                     dtype=tf.float32)
         return K.mean(tf.stack(batched_losses))  
+    return loss_batch
+
+def chamfer(pos, thresh=0.1, dtype=tf.float32):
+    dist = tf.cast(cdist(pos, pos), dtype=dtype)
+    pos = tf.cast(pos, dtype=dtype)
+    def loss_batch(y_true, y_pred):
+        def loss(y_true, y_pred):
+            # print("third: ", tf.shape(y_true))
+        
+            # print(y_true, y_pred)
+            # find indices above threshold
+            idc_true = tf.where(K.abs(y_true) > K.max(K.abs(y_true)) * thresh)[:, 0]
+            idc_pred = tf.where(K.abs(y_pred) > K.max(K.abs(y_pred)) * thresh)[:, 0]
+            # print(idc_true, idc_pred)
+            # retrieve the correct distances
+            dist_true = tf.gather(dist, idc_true, axis=0)
+            dist_true = tf.gather(dist_true, idc_pred, axis=1)
+            
+            # print(dist_true)
+            
+            
+
+            lowest_dists_1 = tf.reduce_min(dist_true, axis=0)
+            lowest_dists_2 = tf.reduce_min(dist_true, axis=1)
+
+            sum_squares_1 = K.sum(K.square(lowest_dists_1))
+            sum_squares_2 = K.sum(K.square(lowest_dists_2))
+
+
+            error = sum_squares_1 + sum_squares_2
+            # print("error on single sample and time: ", error)
+            return error
+        # reshaping
+        new_shape = (tf.shape(y_true)[0]*tf.shape(y_true)[1], tf.shape(y_true)[2])
+        y_true = tf.reshape(y_true, new_shape)
+        y_pred = tf.reshape(y_pred, new_shape)
+        # print(y_true, y_pred)
+        batched_losses = tf.map_fn(lambda x:
+                                    loss(x[0], x[1]),
+                                    (y_true, y_pred), dtype=tf.float32)
+        error = K.mean(tf.stack(batched_losses))
+        # print("error on all samples and all times: ", error)
+        return error
     return loss_batch
