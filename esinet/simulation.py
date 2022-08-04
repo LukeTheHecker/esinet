@@ -8,7 +8,7 @@ import random
 from joblib import Parallel, delayed
 # from tqdm.notebook import tqdm
 from tqdm import tqdm
-
+from mne.channels.layout import _find_topomap_coords
 import colorednoise as cn
 import mne
 from time import time
@@ -23,8 +23,9 @@ DEFAULT_SETTINGS = {
     'duration_of_trial': 1.0,
     'sample_frequency': 100,
     'target_snr': (1, 20),
-    'beta': (0.5, 3),  # (0, 3),
-    'exponent': 3,
+    'beta': (1, 5), 
+    'beta_noise': (1, 5),
+    'beta_source': (1, 5),
     'source_spread': "mixed",
     'source_number_weighting': True,
     'source_time_course': "random",
@@ -98,7 +99,12 @@ class Simulation:
         new_object = deepcopy(self)
         new_object.source_data.extend(other.source_data)
         new_object.eeg_data.extend(other.eeg_data)
-        new_object.simulation_info.append(other.simulation_info)
+        new_object.simulation_info = pd.concat([
+            new_object.simulation_info, 
+            other.simulation_info
+            ])
+        #  Deprecated
+        # new_object.simulation_info.append(other.simulation_info)
         new_object.n_samples += other.n_samples
         if new_object.settings["method"] != other.settings["method"]:
             new_object.settings["method"] = "mixed"
@@ -108,7 +114,7 @@ class Simulation:
         self.info = info.pick_channels(self.fwd.ch_names, ordered=True)
 
     def prepare_simulation_info(self):
-        self.simulation_info = pd.DataFrame(columns=['number_of_sources', 'positions', 'extents', 'amplitudes', 'shapes', 'target_snr', 'betas', 'duration_of_trials'])
+        self.simulation_info = pd.DataFrame(columns=['number_of_sources', 'positions', 'extents', 'amplitudes', 'shapes', 'target_snr', 'betas', 'betas_noise', 'duration_of_trials'])
 
     def simulate(self, n_samples=10000):
         ''' Simulate sources and EEG data'''
@@ -200,7 +206,7 @@ class Simulation:
         self.grid = {
             "shape": shape,
             "k_neighbors": k_neighbors,
-            "exponent": self.settings["exponent"],
+            "exponent": self.settings["beta_source"],
             "x": x,
             "y": y,
             "z": z,
@@ -224,7 +230,14 @@ class Simulation:
             src[:, i] = util.vol_to_src(self.grid["neighbor_indices"], src_3d[:, :, :, i], self.pos)
         
         d = dict(number_of_sources=np.nan, positions=[np.nan], extents=[np.nan], amplitudes=[np.nan], shapes=[np.nan], target_snr=0, duration_of_trials=duration_of_trial)
-        self.simulation_info = self.simulation_info.append(d, ignore_index=True)
+        df_new = pd.DataFrame(columns=self.simulation_info.columns)
+        for key, val in d.items():
+            df_new.loc[0, key] = val
+        df_new.reset_index(drop=True)
+
+        self.simulation_info = pd.concat([self.simulation_info, df_new])
+        # deprecated soon:
+        # self.simulation_info = self.simulation_info.append(d, ignore_index=True)
         return src
         
     def sources_to_sourceEstimates(self, source_data):
@@ -285,7 +298,7 @@ class Simulation:
             population = np.arange(*self.settings["number_of_sources"])
             weights = 1 / population
             weights /= weights.sum()
-            number_of_sources = random.choices(population=population,weights=weights,k=1)[0]
+            number_of_sources = random.choices(population=population,weights=weights, k=1)[0]
 
         
         if self.settings["source_spread"] == 'mixed':
@@ -317,17 +330,21 @@ class Simulation:
             self.settings['duration_of_trial'], dtype=float
         )
         signal_length = int(round(self.settings['sample_frequency']*duration_of_trial))
-
+        betas = []
         if signal_length > 1:
             signals = []
             
             if self.settings["source_time_course"].lower() == "pulse":
                 signals = [self.get_biphasic_pulse(signal_length) for _ in range(number_of_sources)]
             else:
+                
                 for _ in range(number_of_sources):
-                    signal = cn.powerlaw_psd_gaussian(self.get_from_range(self.settings['beta'], dtype=float), signal_length) 
+                    beta = self.get_from_range(self.settings['beta'], dtype=float)
+                    signal = cn.powerlaw_psd_gaussian(beta, signal_length) 
                     signal /= np.max(np.abs(signal))
                     signals.append(signal)
+                    betas.append(beta)
+                    
             
             sample_frequency = self.settings['sample_frequency']
         else:  # else its a single instance
@@ -388,10 +405,16 @@ class Simulation:
                 raise(msg)
         
         # Document the sample
-        d = dict(number_of_sources=number_of_sources, positions=self.pos[src_centers], extents=extents, amplitudes=amplitudes, shapes=shapes, target_snr=0, duration_of_trials=duration_of_trial)
-        self.simulation_info = self.simulation_info.append(d, ignore_index=True)
-        # self.simulation_info = pd.concat([self.simulation_info, d])
+        d = dict(number_of_sources=number_of_sources, positions=self.pos[src_centers], extents=extents, amplitudes=amplitudes, shapes=shapes, target_snr=0, duration_of_trials=duration_of_trial, betas=betas)
+        df_new = pd.DataFrame(columns=self.simulation_info.columns)
+        for key, val in d.items():
+            df_new.loc[0, key] = val
+        df_new.reset_index(drop=True)
+
+        self.simulation_info = pd.concat([self.simulation_info, df_new])
         
+        # deprecated soon:
+        # self.simulation_info = self.simulation_info.append(d, ignore_index=True)
         return source
 
     def simulate_eeg(self):
@@ -422,7 +445,6 @@ class Simulation:
                 (see argument <return_raw_data> to change output)
         '''
 
-        n_simulation_trials = 20
          
         # Desired Dim of sources: (samples x dipoles x time points)
         # unpack numpy array of source data
@@ -436,7 +458,7 @@ class Simulation:
         for i, source in enumerate(self.source_data):
             if len(source.shape) == 1:
                 self.source_data[i] = np.expand_dims(source, axis=-1)
-        print('source data shape: ', self.source_data[0].shape, self.source_data[1].shape)
+        # print('source data shape: ', self.source_data[0].shape, self.source_data[1].shape)
                 
 
         # Load some forward model objects
@@ -445,11 +467,10 @@ class Simulation:
         n_samples = np.clip(len(self.source_data), a_min=1, a_max=np.inf).astype(int)
 
         target_snrs = [self.get_from_range(self.settings['target_snr'], dtype=float) for _ in range(n_samples)]
-        betas = [self.get_from_range(self.settings['beta'], dtype=float) for _ in range(n_samples)]
+        betas_noise = [self.get_from_range(self.settings['beta_noise'], dtype=float) for _ in range(n_samples)]
 
         # Document snr and beta into the simulation info
-        
-        self.simulation_info['betas'] = betas
+        self.simulation_info['betas_noise'] = betas_noise
         self.simulation_info['target_snr'] = target_snrs
     
         # Desired Dim for eeg_clean: (samples, electrodes, time points)
@@ -460,24 +481,23 @@ class Simulation:
         if self.verbose:
             print(f'\nCreate EEG trials with noise...')
         
-        # Parallel processing was removed since it was extraordinarily slow:
-        # if self.parallel:
-        #     eeg_trials_noisy = Parallel(n_jobs=self.n_jobs, backend='loky') \
-        #         (delayed(self.create_eeg_helper)(eeg_clean[sample], n_simulation_trials,
-        #             target_snrs[sample], betas[sample]) 
-        #         for sample in tqdm(range(n_samples)))
-        # else:
-        # eeg_trials_noisy = np.zeros((eeg_clean.shape[0], n_simulation_trials, *eeg_clean.shape[1:]))
-        
+        # Add noise
+        self.noise_generator = NoiseGenerator(self.info)
+
         eeg_trials_noisy = []
         for sample in tqdm(range(n_samples)):
             eeg_trials_noisy.append( self.create_eeg_helper(eeg_clean[sample], 
-                n_simulation_trials, target_snrs[sample], betas[sample]) 
+                target_snrs[sample], betas_noise[sample]) 
             )
+
         for i, eeg_trial_noisy in enumerate(eeg_trials_noisy):
             if len(eeg_trial_noisy.shape) == 2:
-                eeg_trials_noisy[i] = np.expand_dims(eeg_trial_noisy, axis=-1)
-            if eeg_trial_noisy.shape[1] != n_elec:
+                # print("expanding")
+                eeg_trials_noisy[i] = np.expand_dims(eeg_trial_noisy, axis=0)
+                # print("new_shape: ", eeg_trials_noisy[i].shape)
+                
+            if eeg_trials_noisy[i].shape[1] != n_elec:
+                # print(f"problem because n_elec ({n_elec}) must be {eeg_trial_noisy.shape[1]}")
                 eeg_trials_noisy[i] = np.swapaxes(eeg_trial_noisy, 1, 2)
         
         if self.verbose:
@@ -487,16 +507,14 @@ class Simulation:
 
         return epochs
     
-    def create_eeg_helper(self, eeg_sample, n_simulation_trials, target_snr, beta):
+    def create_eeg_helper(self, eeg_sample, target_snr, beta):
         ''' Helper function for EEG simulation that transforms a clean 
             M/EEG signal to a bunch of noisy trials.
 
         Parameters
         ----------
         eeg_sample : numpy.ndarray
-            data sample with dimension (time_points, electrodes)
-        n_simulation_trials : int
-            The number of trials desired
+            data sample with dimension (electrodes, time_points)
         target_snr : float
             The target signal-to-noise ratio
         beta : float
@@ -504,13 +522,10 @@ class Simulation:
 
         '''
         
-        assert len(eeg_sample.shape) == 2, 'Length of eeg_sample must be 2 (time_points, electrodes)'
-        
-        eeg_sample = np.repeat(np.expand_dims(eeg_sample, 0), n_simulation_trials, axis=0)
-        snr = target_snr / np.sqrt(n_simulation_trials)
+        assert len(eeg_sample.shape) == 2, 'Length of eeg_sample must be 2 (electrodes, time_points)'
         
         # Before: Add noise based on the GFP of all channels
-        # noise_trial = self.add_noise(eeg_sample, snr, beta=beta)
+        # noise_trial = self.add_noise(eeg_sample, target_snr, beta=beta)
         
         # NEW: ADD noise for different types of channels, separately
         # since they can have entirely different scales.
@@ -534,9 +549,10 @@ class Simulation:
 
         for i, coil_type in enumerate(coil_types_set):
             channel_indices = np.where(coil_type_assignments==i)[0]
-            eeg_sample_temp = eeg_sample[:, channel_indices, :]
-            noise_trial_subtype = self.add_noise(eeg_sample_temp, snr, beta=beta)
-            noise_trial[:, channel_indices, :] = noise_trial_subtype
+            # print(eeg_sample.shape)
+            eeg_sample_temp = eeg_sample[channel_indices, :]
+            noise_trial_subtype = self.add_noise(eeg_sample_temp, target_snr, beta=beta)
+            noise_trial[channel_indices, :] = noise_trial_subtype
 
 
         
@@ -588,17 +604,20 @@ class Simulation:
         """
     
         # This looks inconvenient but we need to make sure that there is no empty dimension for the powerlaw noise function.
-        x_shape = (x.shape[0], x.shape[1], np.clip(x.shape[2], a_min=2, a_max=np.inf).astype(int))
-        noise = cn.powerlaw_psd_gaussian(beta, x_shape)
+        x_shape = (x.shape[0], np.clip(x.shape[1], a_min=2, a_max=np.inf).astype(int))
+        # noise = cn.powerlaw_psd_gaussian(beta, x_shape)
+        # print("old noise: ", noise.shape)
+        noise = self.noise_generator.get_noise(n_time=x_shape[-1], exponent=beta)
+        # print("new noise: ", noise.shape)
         
         # In case we added another entry in the 2nd dimension we have to remove it here again.
-        if x_shape[2] != x.shape[2]:
-            noise=noise[:, :, :1]
+        if x_shape[1] != x.shape[1]:
+            noise=noise[:, :1]
     
-        noise_gfp = np.std(noise, axis=1)
+        noise_gfp = np.std(noise, axis=0)
         rms_noise = np.median(noise_gfp)  # rms(noise)
         
-        x_gfp = np.std(x, axis=1)
+        x_gfp = np.std(x, axis=0)
         rms_x = np.median(x_gfp)  # np.mean(np.max(np.abs(x_gfp), axis=1))  # x.max()
         if rms_x == 0:  
             # in case most of the signal is zero, e.g. when using biphasic pulses
@@ -898,3 +917,64 @@ def get_n_order_indices(order, pick_idx, neighbors):
         
         current_indices = list(set(current_indices))
     return current_indices
+
+
+class NoiseGenerator:
+    ''' Generates multidimensional colored noise.
+    Parameters
+    ----------
+    info : mne.Info
+        The mne-python Info object, e.g. present in evoked.info
+    '''
+
+    def __init__(self, info):
+        '''
+        Parameters
+        ----------
+        info : mne.Info
+            The mne-python Info object, e.g. present in evoked.info
+        '''
+        self.info = info
+        self.prepare()
+        pass
+    def prepare(self, resolution=16, k_neighbors=5):
+        ''' Prepare the regularly spaced grid.
+        '''
+        
+        # n_time = sim.eeg_data[0].average().times.size
+        # shape = (resolution, resolution, n_time)
+        self.elec_pos = _find_topomap_coords(self.info, self.info.ch_names)
+        x = np.linspace(self.elec_pos[:, 0].min(), self.elec_pos[:, 0].max(), num=resolution)
+        y = np.linspace(self.elec_pos[:, 1].min(), self.elec_pos[:, 1].max(), num=resolution)
+
+        grid = np.stack(np.meshgrid(x,y, indexing='ij'), axis=0)
+        grid_flat = grid.reshape(2, resolution**2)
+
+        # grid_flat = grid.reshape(grid.shape[0], np.product(grid.shape[1:])).T
+        neighbor_indices = np.stack([
+            np.argsort(np.sqrt(np.sum((grid_flat.T - coords)**2, axis=1)))[:k_neighbors] for coords in self.elec_pos
+        ], axis=0)
+
+        self.resolution = resolution
+        self.grid = grid
+        self.grid_flat = grid_flat
+        self.k_neighbors = k_neighbors
+        self.neighbor_indices = neighbor_indices
+        
+
+    def get_noise(self, n_time, exponent=2):
+        ''' Create colored noise of spectrum 1/f**exponent. The noise is first
+        generated on an equally spaced grid and transferred the the electrodes
+        using nearest-neighbor interpolation.
+
+        '''
+
+        noise_grid = util.create_n_dim_noise((self.resolution, self.resolution, n_time), exponent=exponent)
+        noise_elec = np.zeros((self.elec_pos.shape[0], n_time))
+        for e, e_pos in enumerate(self.elec_pos):
+            for t in range(n_time):
+                # neighbor_idc = np.argsort(np.sum((self.grid_flat.T - e_pos)**2, axis=1))[:self.k_neighbors]
+                neighbor_idc = self.neighbor_indices[e,:]
+                noise_transformed = np.mean(noise_grid[:, :, t].flatten()[neighbor_idc])
+                noise_elec[e, t] = noise_transformed
+        return noise_elec
