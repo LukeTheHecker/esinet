@@ -94,6 +94,7 @@ class Simulation:
         self.parallel = parallel
         self.verbose = verbose
         self.diams = None
+        
     
     def __add__(self, other):
         new_object = deepcopy(self)
@@ -462,8 +463,7 @@ class Simulation:
                 
 
         # Load some forward model objects
-        fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
-        n_elec = leadfield.shape[0]
+        n_elec = self.leadfield.shape[0]
         n_samples = np.clip(len(self.source_data), a_min=1, a_max=np.inf).astype(int)
 
         target_snrs = [self.get_from_range(self.settings['target_snr'], dtype=float) for _ in range(n_samples)]
@@ -503,7 +503,7 @@ class Simulation:
         if self.verbose:
             print(f'\nConvert EEG matrices to a single instance of mne.Epochs...')
         ERP_samples_noisy = [np.mean(eeg_trial_noisy, axis=0) for eeg_trial_noisy in eeg_trials_noisy]
-        epochs = util.eeg_to_Epochs(ERP_samples_noisy, fwd_fixed, info=self.info)
+        epochs = util.eeg_to_Epochs(ERP_samples_noisy, self.fwd_fixed, info=self.info)
 
         return epochs
     
@@ -570,9 +570,8 @@ class Simulation:
         ------
 
         '''
-        fwd_fixed, leadfield = util.unpack_fwd(self.fwd)[:2]
         n_samples = len(sources)
-        # n_elec, n_dipoles = leadfield.shape
+        # n_elec, n_dipoles = self.leadfield.shape
         # eeg = np.zeros((n_samples, n_elec, n_timepoints))
         eeg = []
         # Swap axes to dipoles, samples, time_points
@@ -582,7 +581,7 @@ class Simulation:
             # sources_tmp.shape[1]*sources_tmp.shape[2])
         # sources_tmp = sources_tmp.reshape(short_shape)
 
-        result = [np.matmul(leadfield, src.data) for src in sources]
+        result = [np.matmul(self.leadfield, src.data) for src in sources]
         
         # Reshape result
         # result = result.reshape(result.shape[0], n_samples, n_timepoints)
@@ -635,8 +634,7 @@ class Simulation:
         '''
         if self.settings is None:
             self.settings = DEFAULT_SETTINGS
-        
-        _, _, self.pos, _ = util.unpack_fwd(self.fwd)
+        self.fwd_fixed, self.leadfield, self.pos, _ = util.unpack_fwd(self.fwd)
         self.distance_matrix = cdist(self.pos, self.pos)
 
         # Check for wrong keys:
@@ -892,7 +890,7 @@ class Simulation:
         diam = 0
         order = 0
         while diam<100:
-            diam = util.get_source_diam_from_order(order, self.fwd, dists=deepcopy(self.distance_matrix))
+            diam = util.get_source_diam_from_order(order, self.pos, dists=deepcopy(self.distance_matrix))
             diams.append( diam )
             order += 1
         self.diams = np.array(diams)

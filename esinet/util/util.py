@@ -158,25 +158,31 @@ def unpack_fwd(fwd):
     tris : numpy.ndarray
         The triangles that describe the source mmodel
     """
-    if fwd['surf_ori']:
-        fwd_fixed = fwd
-    else:
-        fwd_fixed = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True,
-                                                    use_cps=True, verbose=0)
+    fwd_fixed = fwd
+    if not fwd['surf_ori']:
+        print("Forward model does not contain fixed orientations - expect unexpected behavior!")
+        # fwd_fixed = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True,
+        #                                             use_cps=True, verbose=0)
+
+    
     tris = fwd['src'][0]['use_tris']
     leadfield = fwd_fixed['sol']['data']
 
     source = fwd['src']
-    try:
-        subject_his_id = source[0]['subject_his_id']
-        pos_left = mne.vertex_to_mni(source[0]['vertno'], 0, subject_his_id, verbose=0)
-        pos_right = mne.vertex_to_mni(source[1]['vertno'],  1, subject_his_id, verbose=0)
-    except:
-        subject_his_id = 'fsaverage'
-        pos_left = mne.vertex_to_mni(source[0]['vertno'], 0, subject_his_id, verbose=0)
-        pos_right = mne.vertex_to_mni(source[1]['vertno'],  1, subject_his_id, verbose=0)
 
-    pos = np.concatenate([pos_left, pos_right], axis=0)
+    if source[0]["type"] == "vol":
+        pos = source[0]["rr"]
+    else:            
+        try:
+            subject_his_id = source[0]['subject_his_id']
+            pos_left = mne.vertex_to_mni(source[0]['vertno'], 0, subject_his_id, verbose=0)
+            pos_right = mne.vertex_to_mni(source[1]['vertno'],  1, subject_his_id, verbose=0)
+        except:
+            subject_his_id = 'fsaverage'
+            pos_left = mne.vertex_to_mni(source[0]['vertno'], 0, subject_his_id, verbose=0)
+            pos_right = mne.vertex_to_mni(source[1]['vertno'],  1, subject_his_id, verbose=0)
+
+        pos = np.concatenate([pos_left, pos_right], axis=0)
 
     return fwd_fixed, leadfield, pos, tris#
 
@@ -375,7 +381,7 @@ def calculate_source(data_obj, fwd, duration_of_trial=None, baseline_span=(-0.2,
 
     return source_estimate
 
-def get_source_diam_from_order(order, fwd, dists=None):
+def get_source_diam_from_order(order, pos, dists=None):
     ''' Calculate the estimated source diameter given the neighborhood order.
      Useful to calculate source extents using the region_growing method in the
      esinet.Simulation object.
@@ -384,10 +390,10 @@ def get_source_diam_from_order(order, fwd, dists=None):
     ----------
     order : int,
         The neighborhood order of interest
-    fwd : mne.Forward
-        The forward model.
+    pos : numpy.ndarray
+        Positions of the source model dipoles.
     '''
-    pos = unpack_fwd(fwd)[2]
+    # pos = unpack_fwd(fwd)[2]
     if dists is None:
         dists = cdist(pos, pos)
     dists[dists==0] = np.nan

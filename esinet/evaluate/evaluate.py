@@ -67,6 +67,22 @@ def get_maxima_pos(mask, pos):
     '''
     return pos[np.where(mask==1)[0]]
 
+def eval_residual_variance(M_true, M_est):
+    ''' Calculate the Residual Variance (1- goodness of fit) between the
+    estimated EEG and the original EEG.
+    
+    Parameters
+    ----------
+    M_true : numpy.ndarray
+        The true EEG data (as recorded). May be a single time point or
+        spatio-temporal.
+    M_est : numpy.ndarray
+        The estimated EEG data (projected from the estimated source). May be a
+        single time point or spatio-temporal.
+    '''
+    return 100 *  np.sum( (M_true-M_est)**2 ) / np.sum(M_true**2)
+
+
 def eval_mean_localization_error(y_true, y_est, pos, k_neighbors=5, 
     min_dist=30, threshold=0.1, ghost_thresh=40, argsorted_distance_matrix=None):
     ''' Calculate the mean localization error for an arbitrary number of 

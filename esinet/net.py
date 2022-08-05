@@ -492,7 +492,7 @@ class Net:
         lower, upper = [np.percentile(eeg, 25), np.percentile(eeg, 75)]
         return (eeg-lower) / (upper-lower)
 
-    def predict(self, *args):
+    def predict(self, *args, verbose=1):
         ''' Predict sources from EEG data.
 
         Parameters
@@ -583,13 +583,25 @@ class Net:
 
 
         # Convert sources (numpy.ndarrays) to mne.SourceEstimates objects
-        
+        if verbose>0:
+            eeg_hat = list()
+            for predicted_source in predicted_sources_scaled:
+                eeg_hat.append( self.leadfield @ predicted_source )
+            print("True eeg shape: ", np.stack(eeg, axis=0).shape)
+            print("est eeg shape: ", np.stack(eeg_hat, axis=0).shape)
+            
+            residual_variances = [round(self.calc_residual_variance(M_hat, M), 2) for M_hat, M in zip(eeg_hat, eeg)]
+            print(f"Residual Variance(s): {residual_variances} [%]")
+
         predicted_source_estimate = [
             util.source_to_sourceEstimate(predicted_source_scaled, self.fwd, \
                 sfreq=sfreq, tmin=tmin, subject=self.subject) \
                 for predicted_source_scaled in predicted_sources_scaled]
         
         return predicted_source_estimate
+
+    def calc_residual_variance(self, M_hat, M):
+        return 100 *  np.sum( (M-M_hat)**2 ) / np.sum(M**2)
 
     def predict_sources(self, eeg):
         ''' Predict sources of 3D EEG (samples, channels, time) by reshaping 
