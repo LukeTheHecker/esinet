@@ -452,7 +452,9 @@ class Net:
                 # Common average ref:
                 for time in range(eeg_sample.shape[-1]):
                     eeg_out[sample][:, time] -= np.mean(eeg_sample[:, time])
-                    eeg_out[sample][:, time] /= np.max(np.abs(eeg_sample[:, time]))
+                    # eeg_out[sample][:, time] /= np.max(np.abs(eeg_sample[:, time]))
+                    eeg_out[sample][:, time] /= eeg_out[sample][:, time].std()
+                    
                     
         else:
             for sample, eeg_sample in enumerate(eeg):
