@@ -1549,4 +1549,3 @@ def build_nas_lstm(hp):
 #             raise AttributeError(msg)
 
 #         return eeg, sources
-

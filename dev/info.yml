@@ -1,0 +1,12 @@
+Worked great:
+
+System 1:
+test_loss = -0.21
+disc_loss = -0.36
+gan_loss = 0.12
+
+- no balancing
+- use history
+- l1_sparsity on generator and discriminator
+- bs=32, epochs=1000
+- no reps
