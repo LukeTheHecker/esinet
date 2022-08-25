@@ -24,7 +24,7 @@ DEFAULT_SETTINGS = {
     'sample_frequency': 100,
     'target_snr': (1, 20),
     'beta': (1, 5), 
-    'beta_noise': (1, 5),
+    'beta_noise': (0, 5),
     'beta_source': (1, 5),
     'source_spread': "mixed",
     'source_number_weighting': True,
