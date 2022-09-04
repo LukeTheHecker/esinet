@@ -8,7 +8,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.layers import (LSTM, GRU, Dense, Flatten, Bidirectional, 
     TimeDistributed, InputLayer, Activation, Reshape, concatenate, Concatenate, 
-    Dropout, Conv2D, multiply)
+    Dropout, Conv1D, Conv2D, multiply)
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -69,7 +69,7 @@ class Net:
     
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
         n_dense_units=200, n_lstm_units=32, activation_function='tanh', 
-        n_filters=8, kernel_size=(3,3), n_jobs=-1, model_type='auto', 
+        n_filters=64, kernel_size=(3,3), l1_reg=1e2, n_jobs=-1, model_type='auto', 
         scale_individually=True, rescale_sources='brent', 
         verbose=True):
 
@@ -79,6 +79,7 @@ class Net:
         self.n_lstm_layers = n_lstm_layers
         self.n_dense_units = n_dense_units
         self.n_lstm_units = n_lstm_units
+        self.l1_reg = l1_reg
         self.activation_function = activation_function
         self.n_filters = n_filters
         self.kernel_size = kernel_size
@@ -259,6 +260,7 @@ class Net:
         stop_idx = int(round(n_samples * (1-validation_split)))
         gen = self.generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size, revert_order=revert_order)
         steps_per_epoch = stop_idx // batch_size
+        
         validation_data = (pad_sequences(x_scaled[stop_idx:], dtype='float32'), pad_sequences(y_scaled[stop_idx:], dtype='float32'))
 
         
@@ -311,12 +313,15 @@ class Net:
                     # print(batch, len(x), batch*batch_size, (batch+1)*batch_size, x[batch*batch_size:(batch+1)*batch_size])
                     x_batch = x[batch*batch_size:(batch+1)*batch_size]
                     y_batch = y[batch*batch_size:(batch+1)*batch_size]
-                    if revert_order:
-                        if np.random.randn()>0:
-                            x_batch = np.flip(x_batch, axis=1)
-                            y_batch = np.flip(y_batch, axis=1)
+                    
                     x_padlet = pad_sequences(x_batch , dtype='float32' )
                     y_padlet = pad_sequences(y_batch , dtype='float32' )
+
+                    if revert_order:
+                        if np.random.randn()>0:
+                            x_padlet = np.flip(x_padlet, axis=1)
+                            y_padlet = np.flip(y_padlet, axis=1)
+                    
 
                     
                         
@@ -806,6 +811,8 @@ class Net:
         '''
         if self.model_type.lower() == 'convdip':
             self._build_convdip_model()
+        elif self.model_type.lower() == "cnn":
+            self._build_cnn_model()
         elif self.model_type.lower() == 'fc':
             self._build_fc_model()
         elif self.model_type.lower() == 'lstm':
@@ -853,17 +860,19 @@ class Net:
         # Combination
         multi = multiply([direct_out, mask], name="multiply")
         self.model = tf.keras.Model(inputs=inputs, outputs=multi, name='Contextualizer')
+        if self.l1_reg is not None:
+            self.model.add_loss(self.l1_reg * self.l1_sparsity(multi))
         
     def _build_fc_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
         
         name = "FC-model"
-        print("wrks4")
-        self.model = keras.Sequential(name=name)
+        # self.model = keras.Sequential(name=name)
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (None, self.n_channels)
-        self.model.add(InputLayer(input_shape=input_shape, name='Input'))
+        # self.model.add(InputLayer(input_shape=input_shape, name='Input'))
+        inputs = tf.keras.Input(shape=input_shape, name='Input_FC')
         
   
         if not isinstance(self.dropout, (tuple, list)):
@@ -881,115 +890,49 @@ class Net:
         else:
             dropout = self.dropout
         
-
+        add_to = inputs
         for i in range(self.n_dense_layers):
-            self.model.add(TimeDistributed(Dense(self.n_dense_units[i], 
-                activation=self.activation_function), name=f'FC_{i}'))
-            self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
+            dense = TimeDistributed(Dense(self.n_dense_units[i], 
+                activation=self.activation_function), name=f'FC_{i}')(add_to)
+            dense = Dropout(dropout[i], name=f'Drop_{i}')(dense)
+            add_to = dense
 
         # Final For-each layer:
-        self.model.add(TimeDistributed(
-            Dense(self.n_dipoles, activation='linear'), name='FC_Out')
-        )
+        out = TimeDistributed(Dense(self.n_dipoles, activation='linear'), name='FC_Out')(dense)
+        self.model = tf.keras.Model(inputs=inputs, outputs=out, name='FC_Model')
+        if self.l1_reg is not None:
+            self.model.add_loss(self.l1_reg * self.l1_sparsity(out))        
 
 
-        self.model.build(input_shape=input_shape)
+        # self.model.build(input_shape=input_shape)
 
-    # def _build_temporal_model(self):
-    #     ''' Build the temporal artificial neural network model using LSTM layers.
-    #     '''
-    #     if self.n_lstm_layers>0 and self.n_dense_layers>0:
-    #         name = "Mixed-model"
-    #     elif self.n_lstm_layers>0 and self.n_dense_layers==0:
-    #         name = "LSTM-model"
-    #     else:
-    #         name = "Dense-model"
-        
-    #     self.model = keras.Sequential(name='LSTM_v2')
-    #     tf.keras.backend.set_image_data_format('channels_last')
-    #     input_shape = (None, self.n_channels)
-    #     self.model.add(InputLayer(input_shape=input_shape, name='Input'))
-        
-    #     # LSTM layers
-    #     if not isinstance(self.n_lstm_units, (tuple, list)):
-    #         self.n_lstm_units = [self.n_lstm_units] * self.n_lstm_layers
-        
-    #     if not isinstance(self.dropout, (tuple, list)):
-    #         dropout = [self.dropout]*self.n_lstm_layers
-    #     else:
-    #         dropout = self.dropout
-        
-    #     for i in range(self.n_lstm_layers):
-    #         self.model.add(Bidirectional(LSTM(self.n_lstm_units[i], 
-    #             return_sequences=True, input_shape=input_shape),
-    #             name=f'RNN_{i}'))
-    #         self.model.add(Dropout(dropout[i], name=f'Dropout_{i}'))
+    def _build_cnn_model(self):
+        tf.keras.backend.image_data_format() == 'channels_last'
+        input_shape = (None, self.n_channels, 1)
 
-    #     # Hidden Dense layer(s):
-    #     if not isinstance(self.n_dense_units, (tuple, list)):
-    #         self.n_dense_units = [self.n_dense_units] * self.n_dense_layers
-        
-    #     if not isinstance(self.dropout, (tuple, list)):
-    #         dropout = [self.dropout]*self.n_dense_layers
-    #     else:
-    #         dropout = self.dropout
-        
+        inputs = tf.keras.Input(shape=input_shape, name='Input_CNN')
+        fc = TimeDistributed(Conv1D(self.n_filters, self.n_channels, activation=self.activation_function, name="HL_D1"))(inputs)
+        fc = TimeDistributed(Flatten())(fc)
+            
+        # LSTM path
+        lstm1 = Bidirectional(GRU(self.n_lstm_units, return_sequences=True), name='GRU')(fc)
+        mask = TimeDistributed(Dense(self.n_dipoles, activation="sigmoid"), name='Mask')(lstm1)
 
-    #     for i in range(self.n_dense_layers):
-    #         self.model.add(TimeDistributed(Dense(self.n_dense_units[i], 
-    #             activation=self.activation_function), name=f'FC_{i}'))
-    #         self.model.add(Dropout(dropout[i], name=f'Drop_{i}'))
+        direct_out = TimeDistributed(Dense(self.n_dipoles, activation="tanh", name="Output_Final"))(fc)
+        multi = multiply([direct_out, mask], name="multiply")
 
-    #     # Final For-each layer:
-    #     self.model.add(TimeDistributed(
-    #         Dense(self.n_dipoles, activation='linear'), name='FC_Out')
-    #     )
+        self.model = tf.keras.Model(inputs=inputs, outputs=multi, name='Contextual_CNN_Model')
+        if self.l1_reg is not None:
+            self.model.add_loss(self.l1_reg * self.l1_sparsity(multi))
+        # model.compile(loss=tf.keras.losses.CosineSimilarity(), optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate))
 
-    #     self.model.build(input_shape=input_shape)
-
-
-    # def _build_temporal_model_v3(self):
-    #     ''' A mixed dense / LSTM network, inspired by:
-    #     "Deep Burst Denoising" (Godarg et al., 2018)
-    #     '''
-    #     inputs = keras.Input(shape=(None, self.n_channels), name='Input')
-    #     # SINGLE TIME FRAME PATH
-    #     fc1 = TimeDistributed(Dense(self.n_dense_units, 
-    #         activation=self.activation_function), 
-    #         name='FC1')(inputs)
-    #     fc1 = Dropout(self.dropout, name='Dropout1')(fc1)
-
-    #     # fc2 = TimeDistributed(Dense(self.n_dipoles,
-    #     #     activation=self.activation_function), 
-    #     #     name='FC2')(fc1)
-    #     # fc2 = Dropout(self.dropout, name='Dropout2')(fc2)
-
-    #     # model_s = keras.Model(inputs=inputs, outputs=fc2, 
-    #     #     name='single_time_ frame_model')
-
-    #     # MULTI TIME FRAME PATH
-    #     lstm1 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
-    #         input_shape=(None, self.n_dense_units), dropout=self.dropout, 
-    #         activation=self.activation_function), name='LSTM1')(inputs)
-
-    #     concat = concatenate([lstm1, fc1], name='Concat')
-
-    #     lstm2 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
-    #         input_shape=(None, self.n_dense_units), dropout=self.dropout, 
-    #         activation=self.activation_function), name='LSTM2')(concat)
-
-    #     output = TimeDistributed(Dense(self.n_dipoles), name='FC_Out')(lstm2)
-    #     model_m = keras.Model(inputs=inputs, outputs=output, name='LSTM_v3')
-
-    #     self.model = model_m
-    
-        
     def _build_convdip_model(self):
-        self.model = keras.Sequential(name='ConvDip-model')
+        # self.model = keras.Sequential(name='ConvDip-model')
         tf.keras.backend.set_image_data_format('channels_last')
-        # Some definitions
         input_shape = (None, *self.interp_channel_shape, 1)
-        
+        inputs = tf.keras.Input(shape=input_shape, name='Input_ConvDip')
+        # Some definitions
+              
 
         # Hidden Dense layer(s):
         if not isinstance(self.n_dense_units, (tuple, list)):
@@ -1000,24 +943,33 @@ class Net:
         else:
             dropout = self.dropout
 
-        self.model.add(InputLayer(input_shape=input_shape, name='Input'))
+        # self.model.add(InputLayer(input_shape=input_shape, name='Input'))
+        add_to = inputs
         for i in range(self.n_lstm_layers):
-            self.model.add(TimeDistributed(Conv2D(self.n_filters, self.kernel_size, activation=self.activation_function, name=f"Conv2D_{i}")))
-            self.model.add(Dropout(dropout[i], name=f'Drop_conv2d_{i}'))
+            conv = TimeDistributed(Conv2D(self.n_filters, self.kernel_size, activation=self.activation_function, name=f"Conv2D_{i}"))(add_to)
+            conv = Dropout(dropout[i], name=f'Drop_conv2d_{i}')(conv)
+            add_to = conv
 
 
-        self.model.add(TimeDistributed(Flatten()))
 
+        flat = TimeDistributed(Flatten())(conv)
+        add_to = flat
         for i in range(self.n_dense_layers):
-            self.model.add(TimeDistributed(Dense(self.n_dense_units[i], activation=self.activation_function, name=f'FC_{i}')))
-            self.model.add(Dropout(dropout[i], name=f'Drop_FC_{i}'))
+            dense = TimeDistributed(Dense(self.n_dense_units[i], activation=self.activation_function, name=f'FC_{i}'))(add_to)
+            dense = Dropout(dropout[i], name=f'Drop_FC_{i}')(dense)
+            add_to = dense
 
         # Outout Layer
-        self.model.add(TimeDistributed(Dense(self.n_dipoles, activation='linear'), name='FC_Out'))
-
-        self.model.build(input_shape=input_shape)
-
+        out = TimeDistributed(Dense(self.n_dipoles, activation='linear'), name='FC_Out')(dense)
+        self.model = tf.keras.Model(inputs=inputs, outputs=out, name='ConvDip_Model')
+        if self.l1_reg is not None:
+            self.model.add_loss(self.l1_reg * self.l1_sparsity(out))
         
+
+    @staticmethod
+    def l1_sparsity(x):
+        new_x = tf.math.l2_normalize(x)
+        return K.mean(K.abs(new_x))
         
   
 

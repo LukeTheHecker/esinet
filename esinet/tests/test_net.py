@@ -9,7 +9,7 @@ sampling = 'ico3'
 fwd = forward.create_forward_model(sampling=sampling)
 
 @pytest.mark.parametrize("duration_of_trial", [0.0, 0.1, (0.0, 0.1)])
-@pytest.mark.parametrize("model_type", ['lstm', 'fc', 'convdip'])
+@pytest.mark.parametrize("model_type", ['lstm', 'fc', 'cnn', 'convdip'])
 def test_net(duration_of_trial,model_type):
     settings = dict(duration_of_trial=duration_of_trial)
     sim = simulation.Simulation(fwd, info, settings=settings)
