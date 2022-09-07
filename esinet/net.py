@@ -71,7 +71,7 @@ class Net:
         n_dense_units=200, n_lstm_units=32, activation_function='tanh', 
         n_filters=64, kernel_size=(3,3), l1_reg=1e2, n_jobs=-1, model_type='auto', 
         scale_individually=True, rescale_sources='brent', 
-        verbose=True):
+        verbose=0):
 
         self._embed_fwd(fwd)
         
@@ -260,7 +260,6 @@ class Net:
         stop_idx = int(round(n_samples * (1-validation_split)))
         gen = self.generate_batches(x_scaled[:stop_idx], y_scaled[:stop_idx], batch_size, revert_order=revert_order)
         steps_per_epoch = stop_idx // batch_size
-        
         validation_data = (pad_sequences(x_scaled[stop_idx:], dtype='float32'), pad_sequences(y_scaled[stop_idx:], dtype='float32'))
 
         
@@ -310,19 +309,21 @@ class Net:
                 x_pad = []
                 y_pad = []
                 for batch in range(n_batches):
-                    # print(batch, len(x), batch*batch_size, (batch+1)*batch_size, x[batch*batch_size:(batch+1)*batch_size])
                     x_batch = x[batch*batch_size:(batch+1)*batch_size]
                     y_batch = y[batch*batch_size:(batch+1)*batch_size]
                     
-                    x_padlet = pad_sequences(x_batch , dtype='float32' )
-                    y_padlet = pad_sequences(y_batch , dtype='float32' )
 
                     if revert_order:
                         if np.random.randn()>0:
-                            x_padlet = np.flip(x_padlet, axis=1)
-                            y_padlet = np.flip(y_padlet, axis=1)
+                            # x_batch = np.flip(x_batch, axis=1)
+                            # y_batch = np.flip(y_batch, axis=1)
+                            x_batch = [np.flip(xx, axis=1) for xx in x_batch]
+                            y_batch = [np.flip(yy, axis=1) for yy in y_batch]
                     
-
+                    
+                    
+                    x_padlet = pad_sequences(x_batch , dtype='float32' )
+                    y_padlet = pad_sequences(y_batch , dtype='float32' )
                     
                         
                     x_pad.append( x_padlet )
@@ -621,7 +622,7 @@ class Net:
         '''
         assert len(eeg[0].shape)==2, 'eeg must be a list of 2D numpy array of dim (channels, time)'
 
-        predicted_sources = [self.model.predict(e[np.newaxis, :, :])[0] for e in eeg]
+        predicted_sources = [self.model.predict(e[np.newaxis, :, :], verbose=self.verbose)[0] for e in eeg]
             
         # predicted_sources = np.swapaxes(predicted_sources,1,2)
         predicted_sources = [np.swapaxes(src, 0, 1) for src in predicted_sources]
@@ -640,7 +641,7 @@ class Net:
         '''
         assert len(eeg[0].shape)==4, 'eeg must be a list of 4D numpy array of dim (time, height, width, 1)'
 
-        predicted_sources = [self.model.predict(e[np.newaxis, :, :])[0] for e in eeg]
+        predicted_sources = [self.model.predict(e[np.newaxis, :, :], verbose=self.verbose)[0] for e in eeg]
             
         # predicted_sources = np.swapaxes(predicted_sources,1,2)
         predicted_sources = [np.swapaxes(src, 0, 1) for src in predicted_sources]
@@ -1095,7 +1096,7 @@ class Net:
         x_est = np.matmul(self.leadfield, y_est)
 
         # optimize forward solution
-        tol = 1e-3
+        tol = 1e-9
         options = dict(maxiter=1000, disp=False)
 
         # base scaling
@@ -1107,6 +1108,9 @@ class Net:
         opt = minimize_scalar(self.correlation_criterion, args=(self.leadfield, y_est* base_scaler, x_true), \
             bounds=(0, 1), method='bounded', options=options, tol=tol)
         
+        # opt = minimize_scalar(self.correlation_criterion, args=(self.leadfield, y_est* base_scaler, x_true), \
+        #     bounds=(0, 1), method='L-BFGS-B', options=options, tol=tol)
+
         scaler = opt.x
         y_scaled = y_est * scaler * base_scaler
         return y_scaled
