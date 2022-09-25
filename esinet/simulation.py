@@ -115,7 +115,7 @@ class Simulation:
         self.info = info.pick_channels(self.fwd.ch_names, ordered=True)
 
     def prepare_simulation_info(self):
-        self.simulation_info = pd.DataFrame(columns=['number_of_sources', 'positions', 'extents', 'amplitudes', 'shapes', 'target_snr', 'betas', 'betas_noise', 'duration_of_trials'])
+        self.simulation_info = pd.DataFrame(columns=['number_of_sources', 'positions', 'extents', 'amplitudes', 'shapes', 'target_snr', 'betas', 'betas_noise', 'duration_of_trials', 'beta_source'])
 
     def simulate(self, n_samples=10000):
         ''' Simulate sources and EEG data'''
@@ -229,8 +229,8 @@ class Simulation:
         src = np.zeros((self.pos.shape[0], n_time))
         for i in range(n_time):
             src[:, i] = util.vol_to_src(self.grid["neighbor_indices"], src_3d[:, :, :, i], self.pos)
-        
-        d = dict(number_of_sources=np.nan, positions=[np.nan], extents=[np.nan], amplitudes=[np.nan], shapes=[np.nan], target_snr=0, duration_of_trials=duration_of_trial)
+
+        d = dict(number_of_sources=np.nan, positions=[np.nan], extents=[np.nan], amplitudes=[np.nan], shapes=[np.nan], target_snr=0, duration_of_trials=duration_of_trial, beta_source=exponent)
         df_new = pd.DataFrame(columns=self.simulation_info.columns)
         for key, val in d.items():
             df_new.loc[0, key] = val
