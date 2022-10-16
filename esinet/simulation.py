@@ -597,7 +597,7 @@ class Simulation:
         """ Add noise of given SNR to signal x.
         Parameters:
         -----------
-        x : numpy.ndarray, 3-dimensional numpy array of dims (trials, channels, timepoints)
+        x : numpy.ndarray, 2-dimensional numpy array of dims (channels, timepoints)
         Return:
         -------
         """
@@ -656,8 +656,6 @@ class Simulation:
         
         self.neighbors = self.calculate_neighbors()
         
-
-            
 
     def calculate_neighbors(self):
         adj = mne.spatial_src_adjacency(self.fwd["src"], verbose=0).toarray().astype(int)

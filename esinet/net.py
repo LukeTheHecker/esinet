@@ -851,7 +851,7 @@ class Net:
             activation="linear"),
             name='FC2')(fc1)
         # LSTM Path
-        lstm1 = Bidirectional(GRU(self.n_lstm_units, return_sequences=True, 
+        lstm1 = Bidirectional(LSTM(self.n_lstm_units, return_sequences=True, 
             input_shape=(None, self.n_dense_units), dropout=self.dropout), 
             name='LSTM1')(fc1)
         mask = TimeDistributed(Dense(self.n_dipoles, 
@@ -867,8 +867,6 @@ class Net:
     def _build_fc_model(self):
         ''' Build the temporal artificial neural network model using LSTM layers.
         '''
-        
-        name = "FC-model"
         # self.model = keras.Sequential(name=name)
         tf.keras.backend.set_image_data_format('channels_last')
         input_shape = (None, self.n_channels)
