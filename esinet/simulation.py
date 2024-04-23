@@ -112,7 +112,13 @@ class Simulation:
         return new_object
         
     def check_info(self, info):
-        self.info = info.pick_channels(self.fwd.ch_names, ordered=True)
+        n_chans = len(info['ch_names'])
+        data = np.zeros((n_chans, 1))  
+        evoked = mne.EvokedArray(data, info, verbose=0)
+
+        new_info = evoked.pick_channels(self.fwd.ch_names, ordered=True).info
+        self.info = new_info
+        # self.info = info.pick_channels(self.fwd.ch_names, ordered=True)
 
     def prepare_simulation_info(self):
         self.simulation_info = pd.DataFrame(columns=['number_of_sources', 'positions', 'extents', 'amplitudes', 'shapes', 'target_snr', 'betas', 'betas_noise', 'duration_of_trials', 'beta_source'])
@@ -199,7 +205,7 @@ class Simulation:
         z = np.linspace(self.pos[:, 2].min(), self.pos[:, 2].max(), num=shape[2])
         k_neighbors = 5
         grid = np.stack(np.meshgrid(x,y,z, indexing='ij'), axis=0)
-        grid_flat = grid.reshape(grid.shape[0], np.product(grid.shape[1:])).T
+        grid_flat = grid.reshape(grid.shape[0], np.prod(grid.shape[1:])).T
         neighbor_indices = np.stack([
             np.argsort(np.sqrt(np.sum((grid_flat - coords)**2, axis=1)))[:k_neighbors] for coords in self.pos
         ], axis=0)
@@ -946,7 +952,7 @@ class NoiseGenerator:
         grid = np.stack(np.meshgrid(x,y, indexing='ij'), axis=0)
         grid_flat = grid.reshape(2, resolution**2)
 
-        # grid_flat = grid.reshape(grid.shape[0], np.product(grid.shape[1:])).T
+        # grid_flat = grid.reshape(grid.shape[0], np.prod(grid.shape[1:])).T
         neighbor_indices = np.stack([
             np.argsort(np.sqrt(np.sum((grid_flat.T - coords)**2, axis=1)))[:k_neighbors] for coords in self.elec_pos
         ], axis=0)

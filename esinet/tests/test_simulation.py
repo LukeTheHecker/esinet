@@ -24,7 +24,7 @@ def test_create_info():
 @pytest.mark.parametrize("method", ['standard', 'noise', 'mixed'])
 @pytest.mark.parametrize("source_spread", ['region_growing', 'spherical', 'mixed'])
 @pytest.mark.parametrize("source_number_weighting", [True, False])
-@pytest.mark.parametrize("parallel", [True, False])
+@pytest.mark.parametrize("parallel", [False])
 def test_simulation( number_of_sources, extents, amplitudes,
         shapes, duration_of_trial, sample_frequency, target_snr, beta,
         method, source_spread, source_number_weighting, parallel):

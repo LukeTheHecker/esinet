@@ -69,7 +69,7 @@ class Net:
     
     def __init__(self, fwd, n_dense_layers=1, n_lstm_layers=2, 
         n_dense_units=200, n_lstm_units=32, activation_function='tanh', 
-        n_filters=64, kernel_size=(3,3), l1_reg=1e2, n_jobs=-1, model_type='auto', 
+        n_filters=64, kernel_size=(3,3), l1_reg=None, n_jobs=-1, model_type='auto', 
         scale_individually=True, rescale_sources='brent', 
         verbose=0):
 
@@ -146,7 +146,7 @@ class Net:
         return eeg, sources
 
     def fit(self, *args, optimizer=None, learning_rate=0.001, 
-        validation_split=0.1, epochs=50, metrics=None, device=None, 
+        validation_split=0.05, epochs=50, metrics=None, device=None, 
         false_positive_penalty=2, delta=1., batch_size=8, loss=None, 
         sample_weight=None, return_history=False, dropout=0.2, patience=7, 
         tensorboard=False, validation_freq=1, revert_order=True):
@@ -216,27 +216,17 @@ class Net:
             callbacks = []#[es]
         if optimizer is None:
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            # optimizer = tf.keras.optimizers.Adam(clipvalue=0.5)  # clipnorm=1.)
-            # optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate,
-                # momentum=0.35)
         if self.loss is None:
-            # self.loss = self.default_loss(weight=false_positive_penalty, delta=delta)
-            # self.loss = 'mean_squared_error'
             self.loss = tf.keras.losses.CosineSimilarity()
 
 
         elif type(loss) == list:
             self.loss = self.loss[0](*self.loss[1])
-        if metrics is None:
-            # metrics = [self.default_loss(weight=false_positive_penalty, delta=delta)]
-            metrics = ['mae']
         
         # Compile if it wasnt compiled before
         if not self.compiled:
             self.model.compile(optimizer, self.loss, metrics=metrics)
             self.compiled = True
-        # print("shapes before fit: ", x_scaled.shape, y_scaled.shape)
-        
         
         if self.model_type.lower() == 'convdip':
             # print("interpolating for convdip...")
@@ -264,27 +254,18 @@ class Net:
 
         
         if device is None:
-            # history = self.model.fit(x_scaled, y_scaled, 
-            #     epochs=epochs, batch_size=batch_size, shuffle=True, 
-            #     validation_split=validation_split, verbose=self.verbose, 
-            #     callbacks=callbacks, sample_weight=sample_weight)
             history = self.model.fit(x=gen, 
                     epochs=epochs, batch_size=batch_size, 
                     steps_per_epoch=steps_per_epoch, verbose=self.verbose, callbacks=callbacks, 
                     sample_weight=sample_weight, validation_data=validation_data, 
-                    validation_freq=validation_freq, workers=1)
+                    validation_freq=validation_freq)
         else:
             with tf.device(device):
-                # history = self.model.fit(x_scaled, y_scaled, 
-                #     epochs=epochs, batch_size=batch_size, shuffle=True, 
-                #     validation_split=validation_split, verbose=self.verbose,
-                #     callbacks=callbacks, sample_weight=sample_weight)
-                # history = self.model.fit_generator(gen)
                 history = self.model.fit(x=gen, 
                     epochs=epochs, batch_size=batch_size, 
                     steps_per_epoch=steps_per_epoch, verbose=self.verbose, callbacks=callbacks, 
                     sample_weight=sample_weight, validation_data=validation_data, 
-                    validation_freq=validation_freq, workers=1)
+                    validation_freq=validation_freq)
                 
 
         del x_scaled, y_scaled
@@ -595,8 +576,8 @@ class Net:
             eeg_hat = list()
             for predicted_source in predicted_sources_scaled:
                 eeg_hat.append( self.leadfield @ predicted_source )
-            print("True eeg shape: ", np.stack(eeg, axis=0).shape)
-            print("est eeg shape: ", np.stack(eeg_hat, axis=0).shape)
+            # print("True eeg shape: ", np.stack(eeg, axis=0).shape)
+            # print("est eeg shape: ", np.stack(eeg_hat, axis=0).shape)
             
             residual_variances = [round(self.calc_residual_variance(M_hat, M), 2) for M_hat, M in zip(eeg_hat, eeg)]
             print(f"Residual Variance(s): {residual_variances} [%]")
@@ -1179,19 +1160,259 @@ class Net:
         return self
 
     @staticmethod
-    def make_interpolator(elec_pos, res=9, ch_type='eeg'):
+    def make_interpolator(elec_pos, res=9, ch_type='eeg', image_interp="linear"):
         extrapolate = _check_extrapolate('auto', ch_type)
         sphere = sphere = _check_sphere(None)
         outlines = 'head'
         outlines = _make_head_outlines(sphere, elec_pos, outlines, (0., 0.))
         border = 'mean'
         extent, Xi, Yi, interpolator = _setup_interp(
-            elec_pos, res, extrapolate, sphere, outlines, border)
+            elec_pos, res, image_interp, extrapolate, outlines, border)
         interpolator.set_locations(Xi, Yi)
 
         return interpolator
 
     
+
+class CovNet:
+    ''' Class for the Covariance-based Convolutional Neural Network (CovCNN) for EEG inverse solutions.
+    
+    Attributes
+    ----------
+    forward : mne.Forward
+        The mne-python Forward model instance.
+    '''
+
+    def __init__(self, forward, name="Cov-CNN", n_filters="auto", 
+                activation_function="tanh", batch_size="auto", 
+                n_timepoints=20, batch_repetitions=10,
+                learning_rate=1e-3, loss="cosine_similarity",
+                n_sources=10, n_orders=2, epsilon=0.5, 
+                snr_range=(1,100), alpha="auto", verbose=0, **kwargs):
+        ''' Calculate inverse operator.
+
+        Parameters
+        ----------
+        forward : mne.Forward
+            The mne-python Forward model instance.
+        alpha : float
+            The regularization parameter.
+        
+        Return
+        ------
+        self : object returns itself for convenience
+        '''
+        # Leadfield
+        self.forward = forward
+        self.leadfield = deepcopy(forward["sol"]["data"])
+        self.leadfield -= self.leadfield.mean(axis=0)
+
+        n_channels, n_dipoles = self.leadfield.shape
+        if batch_size == "auto":
+            batch_size = n_dipoles
+        if n_filters == "auto":
+            n_filters = n_channels
+            
+        # Store Parameters
+        
+        
+        # Architecture
+        self.name = name
+        self.n_filters = n_filters
+        self.activation_function = activation_function
+        # Training
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.loss = loss
+        # Training Data
+        self.n_timepoints = n_timepoints
+        self.n_sources = n_sources
+        self.n_orders = n_orders
+        self.batch_repetitions = batch_repetitions
+        self.snr_range = snr_range
+        # Inference
+        self.epsilon = epsilon
+        # Other
+        self.verbose = verbose
+        print("Build Model:..")
+        self.build_model()
+        
+
+    def predict(self, evoked) -> mne.SourceEstimate:
+        source_mat = self.apply_model(evoked)
+        stc = self.source_to_object(source_mat, evoked)
+
+        return stc
+
+    def apply_model(self, evoked) -> np.ndarray:
+        y = deepcopy(evoked.data)
+        y -= y.mean(axis=0)
+        print("werks")
+        # y /= np.linalg.norm(y, axis=0)
+
+        n_channels, n_times = y.shape
+
+        # Compute Data Covariance Matrix
+        C = y@y.T
+        # Scale
+        C /= abs(C).max()
+        
+
+        # Add empty batch and (color-) channel dimension
+        C = C[np.newaxis, :, :, np.newaxis]
+        gammas = self.model.predict(C, verbose=self.verbose)[0]
+        gammas /= gammas.max()
+
+        
+        
+
+
+        # Select dipole indices
+        gammas[gammas<self.epsilon] = 0
+        dipole_idc = np.where(gammas!=0)[0]
+        print("Active dipoles: ", len(dipole_idc))
+
+        # 1) Calculate weighted minimum norm solution at active dipoles
+        n_dipoles = len(gammas)
+        y = deepcopy(evoked.data)
+        y -= y.mean(axis=0)
+        x_hat = np.zeros((n_dipoles, n_times))
+        L = self.leadfield[:, dipole_idc]
+        W = np.diag(np.linalg.norm(L, axis=0))
+        x_hat[dipole_idc, :] = np.linalg.inv(L.T @ L + W.T@W) @ L.T @ y
+
+        
+        return x_hat        
+        
+        
+    def fit(self, sim, patience=7, validation_split=0.05, epochs=300, return_history=True):
+        callbacks = [tf.keras.callbacks.EarlyStopping(patience=patience, restore_best_weights=True),]
+        
+        x_train = np.stack(
+            self.prep_x([ep.average().data for ep in sim.eeg_data])
+            , axis=0)
+        y_train = np.stack(
+            self.prep_y([stc.data for stc in sim.source_data])
+            , axis=0)
+        # print(x_train.shape, y_train.shape)
+        
+        history = self.model.fit(x_train, y_train, epochs=epochs, 
+            validation_split=validation_split, callbacks=callbacks)
+
+        if return_history:
+            return self, history
+        return self
+    def prep_y(self, y):
+        n_samples = len(y)
+        y_scaled = []
+
+        for i in range(n_samples):
+            y_sample = y[i]
+
+            y_sample = np.mean(abs(y_sample), axis=1)
+            thr = y_sample.max()*1e-3
+            y_sample = (y_sample>thr).astype(float)
+            y_scaled.append(y_sample)
+        return y_scaled
+
+
+    def prep_x(self, x):
+        n_samples = len(x)
+        C_scaled = []
+        for i in range(n_samples):
+            x_sample = x[i]
+            # Common Average Reference
+            x_sample -= x_sample.mean(axis=0)
+            x_sample /= np.linalg.norm(x_sample, axis=0)
+            C = x_sample @ x_sample.T
+            C /= abs(C).max()
+            C_scaled.append(C)
+        return C_scaled
+            
+
+    def build_model(self,):
+        n_channels, n_dipoles = self.leadfield.shape
+
+        inputs = tf.keras.Input(shape=(n_channels, n_channels, 1), name='Input')
+
+        cnn1 = Conv2D(self.n_filters, (1, n_channels),
+                    activation=self.activation_function, padding="valid",
+                    name='CNN1')(inputs)
+
+        flat = Flatten()(cnn1)
+        
+        fc1 = Dense(200, 
+            activation=self.activation_function, 
+            name='FC1')(flat)
+        out = Dense(n_dipoles, 
+            activation="sigmoid", 
+            name='Output')(fc1)
+
+        model = tf.keras.Model(inputs=inputs, outputs=out, name='CovCNN')
+        model.compile(loss=self.loss, optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate))
+        if self.verbose > 0:
+            model.summary()
+        
+        self.model = model
+ 
+    def source_to_object(self, source_mat, evoked):
+        ''' Converts the source_mat matrix to an mne.SourceEstimate object '''
+        # Convert source to mne.SourceEstimate object
+        source_model = self.forward['src']
+        vertices = [source_model[0]['vertno'], source_model[1]['vertno']]
+        tmin = evoked.tmin
+        sfreq = evoked.info["sfreq"]
+        tstep = 1/sfreq
+        subject = evoked.info["subject_info"]
+
+        if type(subject) == dict:
+            subject = "bst_raw"
+
+        if subject is None:
+            subject = "fsaverage"
+        
+        stc = mne.SourceEstimate(source_mat, vertices, tmin=tmin, tstep=tstep, subject=subject, verbose=self.verbose)
+        return stc
+
+    def save(self, path, name='model'):
+        # get list of folders in path
+        list_of_folders = os.listdir(path)
+        model_ints = []
+
+        for folder in list_of_folders:
+            full_path = os.path.join(path, folder)
+            if not os.path.isdir(full_path):
+                continue
+            if folder.startswith(name):
+                new_integer = int(folder.split('_')[-1])
+                model_ints.append(new_integer)
+        if len(model_ints) == 0:
+            model_name = f'\\{name}_0'
+        else:
+            model_name = f'\\{name}_{max(model_ints)+1}'
+
+        new_path = path+model_name
+        os.mkdir(new_path)
+
+        # Save model only
+        self.model.save(new_path)
+
+        
+        # Save rest
+        # Delete model since it is not serializable
+        self.model = None
+
+        with open(new_path + '\\instance.pkl', 'wb') as f:
+            pkl.dump(self, f)
+        
+        # Attach model again now that everything is saved
+        try:
+            self.model = tf.keras.models.load_model(new_path, custom_objects={'loss': self.loss})
+        except:
+            print("Load model did not work using custom_objects. Now trying it without...")
+            self.model = tf.keras.models.load_model(new_path)
+        
+        return self
 
 def build_nas_lstm(hp):
     ''' Find optimal model using keras tuner.
@@ -1244,262 +1465,4 @@ def build_nas_lstm(hp):
     )
     return model
 
-# class EnsembleNet:
-#     ''' Uses ensemble of neural networks to perform predictions
-#     Attributes
-#     ----------
-#     nets : list
-#         a list of instances of the Net class
-#     ensemble_mode : str
-#         Decides how the various predictions will be combined.
-#         'average' : average all predictions with equal weight
     
-#     Methods
-#     -------
-#     predict : performs predictions with each Net instance and combines them.
-#     vote_average : the implementation of the ensemble_mode 'average'
-
-#     Examples
-#     --------
-#     ### Build two Nets nad train them
-#     k = 2  # number of models
-#     nets = [Net(fwd).fit(simulation.eeg_data, simulation.source_data) for _ in range(k)]
-#     ### Combine them into an EnsembleNet
-#     ens_net = EnsembleNet(nets)
-#     ### Perform prediction
-#     y_hat = nets[0].predict(simulation_test)
-#     y_hat_ens = ens_net.predict(simulation_test.eeg_data)
-#     ### Plot result
-#     a = simulation_test.source_data.plot(**plot_params)  # Ground truth
-#     b = y_hat.plot(**plot_params)  # single-model prediction
-#     c = y_hat_ens.plot(**plot_params)  # ensemble predicion
-
-
-
-#     '''
-#     def __init__(self, nets, ensemble_mode='average'):
-#         self.nets = nets
-#         self.ensemble_mode = ensemble_mode
-        
-#         if ensemble_mode == 'average':
-#             self.vote = self.vote_average
-#         # if ensemble_mode == 'stack':
-#         #     self.vote = self.vote_stack
-#         else:
-#             msg = f'ensemble_mode {ensemble_mode} not supported'
-#             raise AttributeError(msg)
-        
-
-#     def predict(self, *args):
-#         predictions = [net.predict(args[1]) for net in self.nets]
-#         predictions_data = np.stack([prediction.data for prediction in predictions], axis=0)
-        
-#         ensemble_prediction = predictions[0]
-#         ensemble_prediction.data = self.vote(predictions_data)
-
-#         return ensemble_prediction
-
-#     def vote_average(self, predictions_data):
-#         return np.mean(predictions_data, axis=0)
-
-# class BoostNet:
-#     ''' The Boosted neural network class that creates and trains the boosted model. 
-        
-#     Attributes
-#     ----------
-#     fwd : mne.Forward
-#         the mne.Forward forward model class.
-#     n_nets : int
-#         The number of neural networks to use.
-#     n_layers : int
-#         Number of hidden layers in the neural network.
-#     n_neurons : int
-#         Number of neurons per hidden layer.
-#     activation_function : str
-#         The activation function used for each fully connected layer.
-
-#     Methods
-#     -------
-#     fit : trains the neural network with the EEG and source data
-#     train : trains the neural network with the EEG and source data
-#     predict : perform prediciton on EEG data
-#     evaluate : evaluate the performance of the model
-#     '''
-
-#     def __init__(self, fwd, n_nets=5, n_layers=1, n_neurons=128, 
-#         activation_function='swish', verbose=False):
-
-#         self.nets = [Net(fwd, n_layers=n_layers, n_neurons=n_neurons, 
-#             activation_function=activation_function, verbose=verbose) 
-#             for _ in range(n_nets)]
-
-#         self.linear_regressor = linear_model.LinearRegression()
-
-#         self.verbose=verbose
-#         self.n_nets = n_nets
-
-#     def fit(self, *args, **kwargs):
-#         ''' Train the boost model.
-
-#         Parameters
-#         ----------
-#         *args : esinet.simulation.Simulation
-#             Can be either 
-#                 eeg : mne.Epochs/ numpy.ndarray
-#                     The simulated EEG data
-#                 sources : mne.SourceEstimates/ list of mne.SourceEstimates
-#                     The simulated EEG data
-#                 or
-#                 simulation : esinet.simulation.Simulation
-#                     The Simulation object
-
-#         **kwargs
-#             Arbitrary keyword arguments.
-
-#         Return
-#         ------
-#         self : BoostNet()
-#         '''
-
-#         eeg, sources = self._handle_data_input(args)
-#         self.subject = sources.subject if type(sources) == mne.SourceEstimate else sources[0].subject
-
-#         if self.verbose:
-#             print("Fit neural networks")
-#         self._fit_nets(eeg, sources, **kwargs)
-
-#         ensemble_predictions, _ = self._get_ensemble_predictions(eeg, sources)
-           
-#         if self.verbose:
-#             print("Fit regressor")
-#         # Train linear regressor to combine predictions
-#         self.linear_regressor.fit(ensemble_predictions, sources.data.T)
-
-#         return self
-    
-#     def predict(self, *args):
-#         ''' Perform prediction of sources based on EEG data using the Boosted Model.
-        
-#         Parameters
-#         ----------
-#         *args : 
-#             Can be either 
-#                 eeg : mne.Epochs/ numpy.ndarray
-#                     The simulated EEG data
-#                 sources : mne.SourceEstimates/ list of mne.SourceEstimates
-#                     The simulated EEG data
-#                 or
-#                 simulation : esinet.simulation.Simulation
-#                     The Simulation object
-#         **kwargs
-#             Arbitrary keyword arguments.
-        
-#         Return
-#         ------
-#         '''
-
-#         eeg, sources = self._handle_data_input(args)
-
-#         ensemble_predictions, y_hats = self._get_ensemble_predictions(eeg, sources)
-#         prediction = np.clip(self.linear_regressor.predict(ensemble_predictions), a_min=0, a_max=np.inf)
-        
-#         y_hat = y_hats[0]
-#         y_hat.data = prediction.T
-#         return y_hat
-
-#     def evaluate_mse(self, *args):
-#         ''' Evaluate the model regarding mean squared error
-        
-#         Parameters
-#         ----------
-#         *args : 
-#             Can be either 
-#                 eeg : mne.Epochs/ numpy.ndarray
-#                     The simulated EEG data
-#                 sources : mne.SourceEstimates/ list of mne.SourceEstimates
-#                     The simulated EEG data
-#                 or
-#                 simulation : esinet.simulation.Simulation
-#                     The Simulation object
-
-#         Return
-#         ------
-#         mean_squared_errors : numpy.ndarray
-#             The mean squared error of each sample
-
-#         Example
-#         -------
-#         net = BoostNet()
-#         net.fit(simulation)
-#         mean_squared_errors = net.evaluate(simulation)
-#         print(mean_squared_errors.mean())
-#         '''
-
-#         eeg, sources = self._handle_data_input(args)
-#         y_hat = self.predict(eeg, sources).data
-#         y_true = sources.data
-#         mean_squared_errors = np.mean((y_hat - y_true)**2, axis=0)
-#         return mean_squared_errors
-
-
-#     def _get_ensemble_predictions(self, *args):
-
-#         eeg, sources = self._handle_data_input(args)
-
-#         y_hats = [subnet.predict(eeg, sources) for subnet in self.nets]
-#         ensemble_predictions = np.stack([y_hat[0].data for y_hat in y_hats], axis=0).T
-#         ensemble_predictions = ensemble_predictions.reshape(ensemble_predictions.shape[0], np.prod((ensemble_predictions.shape[1], ensemble_predictions.shape[2])))
-#         return ensemble_predictions, y_hats
-
-#     def _fit_nets(self, *args, **kwargs):
-
-#         eeg, sources = self._handle_data_input(args)
-#         n_samples = eeg.get_data().shape[0]
-#         # sample_weight = np.ones((sources._data.shape[1]))
-        
-#         for net in self.nets:
-#             sample_idc = np.random.choice(np.arange(n_samples), 
-#                 int(0.8*n_samples), replace=True)
-#             eeg_bootstrap = eeg.copy()[sample_idc]
-#             sources_bootstrap = sources.copy()
-#             sources_bootstrap.data = sources_bootstrap.data[:, sample_idc]
-#             net.fit(eeg_bootstrap, sources_bootstrap, **kwargs)#, sample_weight=sample_weight)
-#             # sample_weight = net.evaluate_mse(eeg, sources)
-#             # print(f'new sample weights: mean={sample_weight.mean()} +- {sample_weight.std()}')
-
-        
-#     def _handle_data_input(self, arguments):
-#         ''' Handles data input to the functions fit() and predict().
-        
-#         Parameters
-#         ----------
-#         arguments : tuple
-#             The input arguments to fit and predict which contain data.
-        
-#         Return
-#         ------
-#         eeg : mne.Epochs
-#             The M/EEG data.
-#         sources : mne.SourceEstimates/list
-#             The source data.
-
-#         '''
-#         if len(arguments) == 1:
-#             if isinstance(arguments[0], (mne.Epochs, mne.Evoked, mne.io.Raw, mne.EpochsArray, mne.EvokedArray, mne.epochs.EpochsFIF)):
-#                 eeg = arguments[0]
-#                 sources = None
-#             else:
-#                 simulation = arguments[0]
-#                 eeg = simulation.eeg_data
-#                 sources = simulation.source_data
-#                 # msg = f'First input should be of type simulation or Epochs, but {arguments[1]} is {type(arguments[1])}'
-#                 # raise AttributeError(msg)
-
-#         elif len(arguments) == 2:
-#             eeg = arguments[0]
-#             sources = arguments[1]
-#         else:
-#             msg = f'Input is {type()} must be either the EEG data and Source data or the Simulation object.'
-#             raise AttributeError(msg)
-
-#         return eeg, sources
