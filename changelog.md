@@ -1,5 +1,10 @@
 # Changelog
 
+
+## 0.3.0 25.04.2024
+* updated to accomodate pthon 3.11.9 and mne-python 1.7.0
+* 
+
 ## 0.2.5 25.07.2022
 * Improved LSTM architecture
 
