@@ -275,14 +275,12 @@ class Net:
             return self
     @staticmethod
     def generate_batches(x, y, batch_size, revert_order=True):
-            # print('start generator')
             n_batches = int(len(x) / batch_size)
             x = x[:int(n_batches*batch_size)]
             y = y[:int(n_batches*batch_size)]
             
             time_lengths = [x_let.shape[0] for x_let in x]
             idc = list(np.argsort(time_lengths).astype(int))
-            # print("len idc: ", len(idc), " idc: ", idc)
             
             x = [x[i] for i in idc]
             y = [y[i] for i in idc]
@@ -380,7 +378,7 @@ class Net:
 
         # Handle EEG input
         if (type(eeg) == list and isinstance(eeg[0], util.EPOCH_INSTANCES)) or isinstance(eeg, util.EPOCH_INSTANCES):
-            eeg = [eeg[i].get_data() for i, _ in enumerate(eeg)]
+            eeg = [eeg[i].get_data(copy=True) for i, _ in enumerate(eeg)]
         else:
             eeg = [sample_eeg[0] for sample_eeg in eeg]
 
@@ -505,7 +503,7 @@ class Net:
 
         if isinstance(eeg, util.EVOKED_INSTANCES):
             # Ensure there are no extra channels in our EEG
-            eeg = eeg.pick_channels(self.fwd.ch_names)    
+            eeg = eeg.pick(self.fwd.ch_names)    
 
             sfreq = eeg.info['sfreq']
             tmin = eeg.tmin
@@ -517,7 +515,7 @@ class Net:
                 eeg = np.expand_dims(eeg, axis=2)
         elif isinstance(eeg, util.EPOCH_INSTANCES):
             # Ensure there are no extra channels in our EEG
-            eeg = eeg.pick_channels(self.fwd.ch_names)
+            eeg = eeg.pick(self.fwd.ch_names)
             eeg.load_data()
 
             sfreq = eeg.info['sfreq']
@@ -526,7 +524,7 @@ class Net:
         elif isinstance(eeg, list) and isinstance(eeg[0], util.EPOCH_INSTANCES):
             sfreq = eeg[0].info['sfreq']
             tmin = eeg[0].tmin
-            eeg = [e.get_data()[0] for e in eeg]
+            eeg = [e.get_data(copy=True)[0] for e in eeg]
             
         # else:
         #     msg = f'eeg must be of type <mne.EvokedArray> or <mne.epochs.EpochsArray>; got {type(eeg)} instead.'
@@ -553,12 +551,11 @@ class Net:
                 eeg_prep_interp[i][np.isnan(eeg_prep_interp[i])] = 0
             eeg_prep = eeg_prep_interp
             del eeg_prep_interp
-            # print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
+
             predicted_sources = self.predict_sources_interp(eeg_prep)
         else:
             # Predicted sources all in one go
-            # print("shape of eeg_prep before prediciton: ", eeg_prep[0].shape)
-            predicted_sources = self.predict_sources(eeg_prep)       
+            predicted_sources = self.predict_sources(eeg_prep)
 
         # Rescale Predicitons
         if self.rescale_sources.lower() == 'brent':
@@ -576,8 +573,6 @@ class Net:
             eeg_hat = list()
             for predicted_source in predicted_sources_scaled:
                 eeg_hat.append( self.leadfield @ predicted_source )
-            # print("True eeg shape: ", np.stack(eeg, axis=0).shape)
-            # print("est eeg shape: ", np.stack(eeg_hat, axis=0).shape)
             
             residual_variances = [round(self.calc_residual_variance(M_hat, M), 2) for M_hat, M in zip(eeg_hat, eeg)]
             print(f"Residual Variance(s): {residual_variances} [%]")
@@ -602,12 +597,11 @@ class Net:
             3D numpy array of EEG data (samples, channels, time)
         '''
         assert len(eeg[0].shape)==2, 'eeg must be a list of 2D numpy array of dim (channels, time)'
-
-        predicted_sources = [self.model.predict(e[np.newaxis, :, :], verbose=self.verbose)[0] for e in eeg]
-            
+        predicted_sources = [self.model.predict(e[:, np.newaxis], verbose=self.verbose)[:,0].T for e in eeg]
         # predicted_sources = np.swapaxes(predicted_sources,1,2)
-        predicted_sources = [np.swapaxes(src, 0, 1) for src in predicted_sources]
-        # print("shape of predicted sources: ", predicted_sources[0].shape)
+        # predicted_sources = [np.swapaxes(src, 0, 1) for src in predicted_sources]
+        # predicted_sources = [np.swapaxes(src, 0, 1) for src in predicted_sources]
+        
 
         return predicted_sources
 

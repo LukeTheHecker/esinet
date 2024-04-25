@@ -116,9 +116,9 @@ class Simulation:
         data = np.zeros((n_chans, 1))  
         evoked = mne.EvokedArray(data, info, verbose=0)
 
-        new_info = evoked.pick_channels(self.fwd.ch_names, ordered=True).info
+        new_info = evoked.pick(self.fwd.ch_names).info
         self.info = new_info
-        # self.info = info.pick_channels(self.fwd.ch_names, ordered=True)
+        
 
     def prepare_simulation_info(self):
         self.simulation_info = pd.DataFrame(columns=['number_of_sources', 'positions', 'extents', 'amplitudes', 'shapes', 'target_snr', 'betas', 'betas_noise', 'duration_of_trials', 'beta_source'])
@@ -945,7 +945,7 @@ class NoiseGenerator:
         
         # n_time = sim.eeg_data[0].average().times.size
         # shape = (resolution, resolution, n_time)
-        self.elec_pos = _find_topomap_coords(self.info, self.info.ch_names)
+        self.elec_pos = _find_topomap_coords(self.info, self.info.ch_names, ignore_overlap=True)
         x = np.linspace(self.elec_pos[:, 0].min(), self.elec_pos[:, 0].max(), num=resolution)
         y = np.linspace(self.elec_pos[:, 1].min(), self.elec_pos[:, 1].max(), num=resolution)
 
